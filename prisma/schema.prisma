@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  OWNER
+  MANAGER
+  ACCOUNTANT
+  INVENTORY_TEAM
+  DISPATCH_TEAM
+  QC_TEAM
+  DRIVER_TRANSPORT
+  COLLECTION_TEAM
+  SALES_FIELD_TEAM
+  DEALER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProductStatus {
+  AVAILABLE
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+enum OrderStatus {
+  NEW_ORDER
+  STOCK_CHECKED
+  STOCK_BLOCKED
+  PARTIALLY_BLOCKED
+  BACKORDERED
+  READY_FOR_DISPATCH
+  QC_APPROVED
+  CANCELLATION_REQUESTED
+  TRANSPORT_ASSIGNED
+  ON_THE_WAY
+  PARTIALLY_DELIVERED
+  DELIVERED
+  INVOICE_UPLOADED
+  PARTIALLY_CANCELLED
+  CANCELLED
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  ACCESS_DENIED
+  PASSWORD_RESET
+  PASSWORD_CHANGED
+  FIRST_OWNER_CREATED
+}
+
+model User {
+  id                 String     @id @default(cuid())
+  name               String
+  email              String     @unique
+  phone              String?
+  passwordHash       String?
+  mustChangePassword Boolean    @default(false)
+  role               UserRole
+  status             UserStatus @default(ACTIVE)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  dealerOrders         Order[]            @relation("DealerOrders")
+  assignedDriverOrders Order[]            @relation("AssignedDriverOrders")
+  authSessions         AuthSession[]
+  securityAuditLogs    SecurityAuditLog[] @relation("SecurityAuditLogs")
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model SecurityAuditLog {
+  id          String            @id @default(cuid())
+  eventType   SecurityEventType
+  userId      String?
+  userName    String?
+  userEmail   String?
+  userRole    String?
+  path        String?
+  ipAddress   String?
+  userAgent   String?
+  description String?
+  createdAt   DateTime          @default(now())
+
+  user User? @relation("SecurityAuditLogs", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([eventType])
+  @@index([userId])
+  @@index([userEmail])
+  @@index([createdAt])
+}
+
+model Product {
+  id           String        @id @default(cuid())
+  code         String        @unique
+  name         String
+  stack        String
+  quantity     Int
+  blocked      Int           @default(0)
+  minimumStock Int           @default(0)
+  status       ProductStatus @default(AVAILABLE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  orderItems OrderItem[]
+}
+
+model Order {
+  id               String      @id @default(cuid())
+  orderNumber      String      @unique
+  dealerId         String
+  assignedDriverId String?
+  status           OrderStatus @default(NEW_ORDER)
+  notes            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  dealer         User                 @relation("DealerOrders", fields: [dealerId], references: [id])
+  assignedDriver User?                @relation("AssignedDriverOrders", fields: [assignedDriverId], references: [id])
+  items          OrderItem[]
+  statusHistory  OrderStatusHistory[]
+
+  @@index([dealerId])
+  @@index([assignedDriverId])
+  @@index([status])
+}
+
+model OrderItem {
+  id                String   @id @default(cuid())
+  orderId           String
+  productId         String
+  requestedQuantity Int      @default(0)
+  quantity          Int
+  blockedQuantity   Int      @default(0)
+  deliveredQuantity Int      @default(0)
+  cancelledQuantity Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model OrderStatusHistory {
+  id             String       @id @default(cuid())
+  orderId        String
+  fromStatus     OrderStatus?
+  toStatus       OrderStatus
+  title          String
+  description    String?
+  changedByName  String
+  changedByEmail String
+  changedByRole  String
+  createdAt      DateTime     @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([createdAt])
+}
