@@ -44,6 +44,51 @@ function getProductStatusClass(status: string) {
   return "bg-red-300/10 text-red-300 ring-1 ring-red-300/20";
 }
 
+function getBlockStatusClass(status: string) {
+  if (status === "ACTIVE") {
+    return "bg-cyan-300/10 text-cyan-300 ring-1 ring-cyan-300/20";
+  }
+
+  if (status === "CONSUMED") {
+    return "bg-emerald-300/10 text-emerald-300 ring-1 ring-emerald-300/20";
+  }
+
+  return "bg-slate-300/10 text-slate-300 ring-1 ring-slate-300/20";
+}
+
+function formatDateTime(date: Date | string | null) {
+  if (!date) return "—";
+
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(date));
+}
+
+type StockBlockTimelineRow = {
+  id: string;
+  productId: string;
+  productCode: string;
+  productName: string;
+  productStack: string;
+  orderNumber: string;
+  dealerName: string;
+  quantity: number;
+  status: string;
+  blockReason: string;
+  releaseReason: string | null;
+  blockedAt: Date | string;
+  blockedUntil: Date | string | null;
+  releasedAt: Date | string | null;
+  blockedByName: string | null;
+  releasedByName: string | null;
+};
+
+
 function getInventoryMessage(
   error?: string,
   success?: string,
@@ -179,11 +224,42 @@ export default async function InventoryPage({
     );
   }
 
-  const products = await prisma.product.findMany({
-    orderBy: {
-      createdAt: "asc",
-    },
-  });
+  const [products, stockBlockTimeline] = await Promise.all([
+    prisma.product.findMany({
+      orderBy: {
+        createdAt: "asc",
+      },
+    }),
+    prisma.$queryRawUnsafe<StockBlockTimelineRow[]>(
+      `
+        SELECT
+          sbt."id",
+          sbt."productId",
+          p."code" AS "productCode",
+          p."name" AS "productName",
+          p."stack" AS "productStack",
+          o."orderNumber",
+          dealer."name" AS "dealerName",
+          sbt."quantity",
+          sbt."status",
+          sbt."blockReason",
+          sbt."releaseReason",
+          sbt."blockedAt",
+          sbt."blockedUntil",
+          sbt."releasedAt",
+          sbt."blockedByName",
+          sbt."releasedByName"
+        FROM "StockBlockTimeline" sbt
+        INNER JOIN "Product" p ON p."id" = sbt."productId"
+        INNER JOIN "Order" o ON o."id" = sbt."orderId"
+        INNER JOIN "User" dealer ON dealer."id" = o."dealerId"
+        ORDER BY
+          CASE WHEN sbt."status" = 'ACTIVE' THEN 0 ELSE 1 END,
+          sbt."blockedAt" DESC
+        LIMIT 80
+      `
+    ),
+  ]);
 
   const totalProducts = products.length;
 
@@ -636,6 +712,150 @@ export default async function InventoryPage({
             </table>
           </div>
         </div>
+      </div>
+
+      <div className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
+        <div className="border-b border-white/10 p-4 sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold">Stock Blocking Timeline</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Track which product is blocked for which order, who blocked it,
+                when it was blocked, and when it was released or consumed.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-sm font-bold text-cyan-200">
+              Active Blocks: {stockBlockTimeline.filter((row) => row.status === "ACTIVE").length}
+            </div>
+          </div>
+        </div>
+
+        {stockBlockTimeline.length === 0 ? (
+          <div className="p-6 text-center text-sm text-slate-400 sm:p-10">
+            No stock block timeline records yet. Timeline will start when inventory team blocks stock for an order.
+          </div>
+        ) : (
+          <>
+            <div className="block space-y-4 p-4 lg:hidden">
+              {stockBlockTimeline.map((row) => (
+                <article
+                  key={`mobile-block-${row.id}`}
+                  className="rounded-3xl border border-white/10 bg-slate-950/50 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-bold text-white">
+                        {row.productName}
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {row.productCode} · {row.productStack}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-bold ${getBlockStatusClass(row.status)}`}>
+                      {row.status}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Order</p>
+                      <p className="mt-2 text-sm font-bold text-slate-100">{row.orderNumber}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Quantity</p>
+                      <p className="mt-2 text-sm font-bold text-cyan-300">{row.quantity}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Blocked At</p>
+                      <p className="mt-2 text-xs font-bold text-slate-200">{formatDateTime(row.blockedAt)}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Closed At</p>
+                      <p className="mt-2 text-xs font-bold text-slate-200">{formatDateTime(row.releasedAt)}</p>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-xs leading-5 text-slate-400">
+                    Dealer: <span className="text-slate-200">{row.dealerName}</span> ·
+                    Blocked by: <span className="text-slate-200">{row.blockedByName ?? "System"}</span>
+                  </p>
+                </article>
+              ))}
+            </div>
+
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[1180px] table-fixed text-sm">
+                <colgroup>
+                  <col className="w-[22%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[16%]" />
+                </colgroup>
+
+                <thead className="bg-white/[0.04] text-slate-300">
+                  <tr>
+                    <th className="px-5 py-4 text-left font-semibold">Product</th>
+                    <th className="px-4 py-4 text-left font-semibold">Order</th>
+                    <th className="px-4 py-4 text-center font-semibold">Quantity</th>
+                    <th className="px-4 py-4 text-center font-semibold">Status</th>
+                    <th className="px-4 py-4 text-left font-semibold">Blocked</th>
+                    <th className="px-4 py-4 text-left font-semibold">Closed</th>
+                    <th className="px-5 py-4 text-left font-semibold">Team</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-white/10">
+                  {stockBlockTimeline.map((row) => (
+                    <tr key={row.id} className="text-slate-300 transition hover:bg-white/[0.03]">
+                      <td className="px-5 py-5 align-middle">
+                        <p className="font-semibold text-white">{row.productName}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {row.productCode} · Stack {row.productStack}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-5 align-middle">
+                        <p className="font-semibold text-slate-100">{row.orderNumber}</p>
+                        <p className="mt-1 text-xs text-slate-500">{row.dealerName}</p>
+                      </td>
+
+                      <td className="px-4 py-5 text-center align-middle font-bold text-cyan-300">
+                        {row.quantity}
+                      </td>
+
+                      <td className="px-4 py-5 text-center align-middle">
+                        <span className={`inline-flex min-w-[86px] justify-center rounded-full px-3 py-1 text-[11px] font-bold ${getBlockStatusClass(row.status)}`}>
+                          {row.status}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-5 align-middle">
+                        <p className="text-xs font-semibold text-slate-200">{formatDateTime(row.blockedAt)}</p>
+                        <p className="mt-1 text-xs text-slate-500">{row.blockReason.replaceAll("_", " ")}</p>
+                      </td>
+
+                      <td className="px-4 py-5 align-middle">
+                        <p className="text-xs font-semibold text-slate-200">{formatDateTime(row.releasedAt)}</p>
+                        <p className="mt-1 text-xs text-slate-500">{row.releaseReason?.replaceAll("_", " ") ?? "Active block"}</p>
+                      </td>
+
+                      <td className="px-5 py-5 align-middle">
+                        <p className="text-xs text-slate-400">Blocked by</p>
+                        <p className="text-sm font-semibold text-slate-200">{row.blockedByName ?? "System"}</p>
+                        {row.releasedByName && (
+                          <p className="mt-1 text-xs text-slate-500">Closed by {row.releasedByName}</p>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

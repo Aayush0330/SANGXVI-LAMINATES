@@ -38,6 +38,11 @@ export const internalNavigation: NavigationItem[] = [
     permission: "manage_dispatch",
   },
   {
+    label: "Transport",
+    href: "/internal/transport",
+    permission: "manage_transport_options",
+  },
+  {
     label: "QC",
     href: "/internal/qc",
     permission: "manage_qc",

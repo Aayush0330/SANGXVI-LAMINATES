@@ -17,6 +17,7 @@ export type Permission =
   | "manage_users"
   | "manage_inventory"
   | "manage_dispatch"
+  | "manage_transport_options"
   | "manage_qc"
   | "view_reports"
   | "view_security_logs"
@@ -65,6 +66,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "manage_users",
     "manage_inventory",
     "manage_dispatch",
+    "manage_transport_options",
     "manage_qc",
     "view_reports",
     "view_security_logs",
@@ -86,6 +88,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "view_internal_dashboard",
     "manage_inventory",
     "manage_dispatch",
+    "manage_transport_options",
     "manage_qc",
     "view_reports",
     "use_office_attendance",
@@ -111,6 +114,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "view_internal_dashboard",
     "use_office_attendance",
     "manage_dispatch",
+    "manage_transport_options",
     "manage_dealer_orders",
   ],
 

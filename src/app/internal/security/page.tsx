@@ -31,6 +31,11 @@ const eventFilterOptions = [
   { value: "ATTENDANCE_PUNCH", label: "Attendance Punch" },
   { value: "ATTENDANCE_BREAK", label: "Attendance Break" },
   { value: "ATTENDANCE_BLOCKED", label: "Attendance Blocked" },
+  { value: "TRANSPORT_OPTION_CREATED", label: "Transport Created" },
+  { value: "TRANSPORT_OPTION_UPDATED", label: "Transport Updated" },
+  { value: "TRANSPORT_OPTION_DISABLED", label: "Transport Disabled" },
+  { value: "TRANSPORT_ASSIGNED", label: "Transport Assigned" },
+  { value: "DELIVERY_PROOF_UPLOADED", label: "Delivery Proof Uploaded" },
 ];
 
 function parseSqliteUtcDate(value: Date | string) {
@@ -64,13 +69,19 @@ function getEventLabel(eventType: string) {
   if (eventType === "ATTENDANCE_PUNCH") return "Attendance Punch";
   if (eventType === "ATTENDANCE_BREAK") return "Attendance Break";
   if (eventType === "ATTENDANCE_BLOCKED") return "Attendance Blocked";
+  if (eventType === "TRANSPORT_OPTION_CREATED") return "Transport Created";
+  if (eventType === "TRANSPORT_OPTION_UPDATED") return "Transport Updated";
+  if (eventType === "TRANSPORT_OPTION_DISABLED") return "Transport Disabled";
+  if (eventType === "TRANSPORT_ASSIGNED") return "Transport Assigned";
+  if (eventType === "DELIVERY_PROOF_UPLOADED") return "Delivery Proof Uploaded";
   return eventType;
 }
 
 function getEventClass(eventType: string) {
   if (eventType === "LOGIN_SUCCESS" || eventType === "FIRST_OWNER_CREATED" || eventType === "ATTENDANCE_PUNCH") return "bg-emerald-300/10 text-emerald-300";
   if (eventType === "ATTENDANCE_BREAK") return "bg-yellow-300/10 text-yellow-300";
-  if (eventType === "LOGIN_FAILED" || eventType === "ACCESS_DENIED" || eventType === "ATTENDANCE_BLOCKED") return "bg-red-300/10 text-red-300";
+  if (eventType === "TRANSPORT_OPTION_CREATED" || eventType === "TRANSPORT_OPTION_UPDATED" || eventType === "TRANSPORT_ASSIGNED" || eventType === "DELIVERY_PROOF_UPLOADED") return "bg-blue-300/10 text-blue-300";
+  if (eventType === "LOGIN_FAILED" || eventType === "ACCESS_DENIED" || eventType === "ATTENDANCE_BLOCKED" || eventType === "TRANSPORT_OPTION_DISABLED") return "bg-red-300/10 text-red-300";
   if (eventType === "PASSWORD_RESET" || eventType === "PASSWORD_CHANGED" || eventType === "OFFICE_LOCATION_UPDATED") return "bg-yellow-300/10 text-yellow-300";
   return "bg-cyan-300/10 text-cyan-300";
 }

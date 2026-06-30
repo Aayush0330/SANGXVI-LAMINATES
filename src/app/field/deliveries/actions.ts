@@ -1,14 +1,43 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
+import { createSecurityAuditLog } from "@/lib/security-audit";
 import {
   recordOrderStatusHistory,
   type HistoryClient,
 } from "@/lib/order-status-history";
+import { closeStockBlockTimeline } from "@/lib/stock-block-timeline";
 import { OrderStatus, ProductStatus } from "@/generated/prisma/client";
+
+function hasExpectedFileSignature(bytes: Uint8Array, mimeType: string) {
+  const startsWith = (signature: number[]) =>
+    signature.every((byte, index) => bytes[index] === byte);
+
+  if (mimeType === "image/jpeg") {
+    return startsWith([0xff, 0xd8, 0xff]);
+  }
+
+  if (mimeType === "image/png") {
+    return startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  }
+
+  if (mimeType === "image/webp") {
+    return (
+      startsWith([0x52, 0x49, 0x46, 0x46]) &&
+      [0x57, 0x45, 0x42, 0x50].every((byte, index) => bytes[index + 8] === byte)
+    );
+  }
+
+  if (mimeType === "application/pdf") {
+    return startsWith([0x25, 0x50, 0x44, 0x46, 0x2d]);
+  }
+
+  return false;
+}
 
 function getProductStatus(quantity: number, minimumStock: number) {
   if (quantity <= 0) {
@@ -193,6 +222,18 @@ export async function markDeliveredAction(formData: FormData) {
         },
       });
 
+      await closeStockBlockTimeline({
+        client: tx,
+        orderId: order.id,
+        orderItemId: item.id,
+        productId: item.productId,
+        quantity: blockedToDeliver,
+        currentUser,
+        status: "CONSUMED",
+        releaseReason: "DELIVERED",
+        notes: `${blockedToDeliver} blocked quantity consumed after delivery.`,
+      });
+
       deliveredNow += blockedToDeliver;
       deliveredTotalAfter += nextDelivered;
     }
@@ -213,10 +254,7 @@ export async function markDeliveredAction(formData: FormData) {
       },
       data: {
         status: nextStatus,
-        assignedDriverId:
-          nextStatus === OrderStatus.PARTIALLY_DELIVERED
-            ? null
-            : order.assignedDriverId,
+        assignedDriverId: order.assignedDriverId,
       },
     });
 
@@ -244,4 +282,162 @@ export async function markDeliveredAction(formData: FormData) {
   revalidatePath("/internal/dashboard");
 
   redirect(`/field/deliveries?success=${redirectSuccess}`);
+}
+
+
+export async function uploadSignedInvoiceProofAction(formData: FormData) {
+  const { currentUser, hasAccess } = await checkPermission(
+    "upload_delivery_proof",
+  );
+
+  if (!hasAccess) {
+    redirect("/field/deliveries?error=permission-denied");
+  }
+
+  const orderId = String(formData.get("orderId") ?? "");
+  const note = String(formData.get("note") ?? "").trim();
+  const file = formData.get("signedInvoice") as File | null;
+
+  if (!orderId) {
+    redirect("/field/deliveries?error=missing-order");
+  }
+
+  if (!file || file.size <= 0) {
+    redirect("/field/deliveries?error=missing-proof");
+  }
+
+  const allowedMimeTypes = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/pdf",
+  ]);
+
+  if (!allowedMimeTypes.has(file.type)) {
+    redirect("/field/deliveries?error=invalid-proof-type");
+  }
+
+  const maxSize = 3 * 1024 * 1024;
+
+  if (file.size > maxSize) {
+    redirect("/field/deliveries?error=proof-too-large");
+  }
+
+  if (note.length > 500) {
+    redirect("/field/deliveries?error=proof-note-too-long");
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  if (!hasExpectedFileSignature(buffer, file.type)) {
+    redirect("/field/deliveries?error=invalid-proof-content");
+  }
+
+  const driver = await prisma.user.findUnique({
+    where: {
+      email: currentUser.email,
+    },
+  });
+
+  if (!driver) {
+    redirect("/field/deliveries?error=driver-not-found");
+  }
+
+  const order = await prisma.order.findUnique({
+    where: {
+      id: orderId,
+    },
+  });
+
+  if (!order) {
+    redirect("/field/deliveries?error=order-not-found");
+  }
+
+  if (order.assignedDriverId !== driver.id) {
+    redirect("/field/deliveries?error=not-your-delivery");
+  }
+
+  const proofAllowedStatuses: OrderStatus[] = [
+    OrderStatus.DELIVERED,
+    OrderStatus.PARTIALLY_DELIVERED,
+    OrderStatus.INVOICE_UPLOADED,
+  ];
+
+  if (!proofAllowedStatuses.includes(order.status)) {
+    redirect("/field/deliveries?error=proof-not-allowed");
+  }
+
+  const fileDataUrl = `data:${file.type};base64,${buffer.toString("base64")}`;
+  const safeFileName = (file.name || "signed-duplicate-invoice")
+    .replace(/[^\w.\- ()]/g, "_")
+    .slice(0, 180);
+  const proofId = randomUUID();
+  const nextStatus =
+    order.status === OrderStatus.DELIVERED
+      ? OrderStatus.INVOICE_UPLOADED
+      : order.status;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO "DeliveryProof" (
+        "id",
+        "orderId",
+        "uploadedById",
+        "proofType",
+        "fileName",
+        "mimeType",
+        "fileDataUrl",
+        "note",
+        "uploadedAt"
+      )
+      VALUES (
+        ${proofId},
+        ${order.id},
+        ${driver.id},
+        'SIGNED_DUPLICATE_INVOICE',
+        ${safeFileName},
+        ${file.type},
+        ${fileDataUrl},
+        ${note || null},
+        CURRENT_TIMESTAMP
+      )
+    `;
+
+    await tx.$executeRaw`
+      UPDATE "Order"
+      SET
+        "signedInvoiceStatus" = 'UPLOADED',
+        "signedInvoiceUploadedAt" = CURRENT_TIMESTAMP,
+        "status" = ${nextStatus}::"OrderStatus",
+        "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "id" = ${order.id}
+    `;
+
+    await recordOrderStatusHistory({
+      client: tx as unknown as HistoryClient,
+      orderId: order.id,
+      fromStatus: order.status,
+      toStatus: nextStatus,
+      title: "Signed Duplicate Invoice Uploaded",
+      description: `${driver.name} uploaded signed duplicate invoice proof${
+        note ? ` with note: ${note}` : ""
+      }.`,
+      currentUser,
+    });
+  });
+
+  await createSecurityAuditLog({
+    eventType: "DELIVERY_PROOF_UPLOADED",
+    user: currentUser,
+    path: "/field/deliveries",
+    description: `${driver.name} uploaded signed duplicate invoice for ${order.orderNumber}.`,
+  });
+
+  revalidatePath("/field/deliveries");
+  revalidatePath("/internal/dispatch");
+  revalidatePath("/dealer/orders");
+  revalidatePath("/internal/dashboard");
+  revalidatePath("/internal/security");
+
+  redirect("/field/deliveries?success=proof-uploaded");
 }

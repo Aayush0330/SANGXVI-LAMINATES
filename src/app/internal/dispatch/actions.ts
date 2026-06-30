@@ -4,16 +4,22 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
+import { createSecurityAuditLog } from "@/lib/security-audit";
 import {
   recordOrderStatusHistory,
   type HistoryClient,
 } from "@/lib/order-status-history";
+import {
+  closeStockBlockTimeline,
+  recordStockBlockTimeline,
+} from "@/lib/stock-block-timeline";
 import {
   OrderStatus,
   ProductStatus,
   UserRole,
   UserStatus,
 } from "@/generated/prisma/client";
+import { getCancellationClosureQuantities } from "@/lib/order-fulfillment";
 
 const CANCELLATION_REQUESTED_STATUS = "CANCELLATION_REQUESTED" as OrderStatus;
 
@@ -70,7 +76,6 @@ function isReadyForDispatchAllowed(status: OrderStatus) {
 
   return allowedStatuses.includes(status);
 }
-
 
 function isQuantityAdjustmentAllowed(status: OrderStatus) {
   const allowedStatuses: OrderStatus[] = [
@@ -178,7 +183,6 @@ export async function markStockCheckedAction(formData: FormData) {
   redirect("/internal/dispatch?success=stock-checked");
 }
 
-
 export async function adjustOrderItemQuantityAction(formData: FormData) {
   const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
 
@@ -197,158 +201,173 @@ export async function adjustOrderItemQuantityAction(formData: FormData) {
     redirect("/internal/dispatch?error=invalid-adjust-quantity");
   }
 
-  await prisma.$transaction(async (tx) => {
-    const orderItem = await tx.orderItem.findUnique({
-      where: {
-        id: orderItemId,
-      },
-      include: {
-        order: true,
-        product: true,
-      },
-    });
-
-    if (!orderItem) {
-      throw new Error("ORDER_ITEM_NOT_FOUND");
-    }
-
-    if (!isQuantityAdjustmentAllowed(orderItem.order.status)) {
-      throw new Error("INVALID_STATUS");
-    }
-
-    const deliveredQuantity = orderItem.deliveredQuantity ?? 0;
-    const cancelledQuantity = orderItem.cancelledQuantity ?? 0;
-    const dealerRequestedQuantity =
-      orderItem.requestedQuantity && orderItem.requestedQuantity > 0
-        ? orderItem.requestedQuantity
-        : orderItem.quantity;
-    const minimumAllowedQuantity = deliveredQuantity + cancelledQuantity;
-
-    if (newQuantity < minimumAllowedQuantity) {
-      throw new Error("INVALID_ADJUST_QUANTITY");
-    }
-
-    if (newQuantity > dealerRequestedQuantity) {
-      throw new Error("APPROVED_EXCEEDS_REQUESTED");
-    }
-
-    const maxBlockedNeeded = Math.max(
-      0,
-      newQuantity - deliveredQuantity - cancelledQuantity
-    );
-    const quantityToRelease = Math.max(
-      0,
-      orderItem.blockedQuantity - maxBlockedNeeded
-    );
-    const nextBlockedQuantity = orderItem.blockedQuantity - quantityToRelease;
-
-    if (quantityToRelease > 0) {
-      const nextAvailableQuantity = orderItem.product.quantity + quantityToRelease;
-      const nextBlockedStock = Math.max(
-        0,
-        orderItem.product.blocked - quantityToRelease
-      );
-
-      await tx.product.update({
+  await prisma
+    .$transaction(async (tx) => {
+      const orderItem = await tx.orderItem.findUnique({
         where: {
-          id: orderItem.productId,
+          id: orderItemId,
         },
-        data: {
-          quantity: nextAvailableQuantity,
-          blocked: nextBlockedStock,
-          status: getProductStatus(
-            nextAvailableQuantity,
-            orderItem.product.minimumStock
-          ),
+        include: {
+          order: true,
+          product: true,
         },
       });
-    }
 
-    await tx.orderItem.update({
-      where: {
-        id: orderItem.id,
-      },
-      data: {
-        requestedQuantity: dealerRequestedQuantity,
-        quantity: newQuantity,
-        blockedQuantity: nextBlockedQuantity,
-      },
-    });
+      if (!orderItem) {
+        throw new Error("ORDER_ITEM_NOT_FOUND");
+      }
 
-    const orderItems = await tx.orderItem.findMany({
-      where: {
+      if (!isQuantityAdjustmentAllowed(orderItem.order.status)) {
+        throw new Error("INVALID_STATUS");
+      }
+
+      const deliveredQuantity = orderItem.deliveredQuantity ?? 0;
+      const cancelledQuantity = orderItem.cancelledQuantity ?? 0;
+      const dealerRequestedQuantity =
+        orderItem.requestedQuantity && orderItem.requestedQuantity > 0
+          ? orderItem.requestedQuantity
+          : orderItem.quantity;
+      const minimumAllowedQuantity = deliveredQuantity + cancelledQuantity;
+
+      if (newQuantity < minimumAllowedQuantity) {
+        throw new Error("INVALID_ADJUST_QUANTITY");
+      }
+
+      if (newQuantity > dealerRequestedQuantity) {
+        throw new Error("APPROVED_EXCEEDS_REQUESTED");
+      }
+
+      const maxBlockedNeeded = Math.max(
+        0,
+        newQuantity - deliveredQuantity - cancelledQuantity,
+      );
+      const quantityToRelease = Math.max(
+        0,
+        orderItem.blockedQuantity - maxBlockedNeeded,
+      );
+      const nextBlockedQuantity = orderItem.blockedQuantity - quantityToRelease;
+
+      if (quantityToRelease > 0) {
+        const nextAvailableQuantity =
+          orderItem.product.quantity + quantityToRelease;
+        const nextBlockedStock = Math.max(
+          0,
+          orderItem.product.blocked - quantityToRelease,
+        );
+
+        await tx.product.update({
+          where: {
+            id: orderItem.productId,
+          },
+          data: {
+            quantity: nextAvailableQuantity,
+            blocked: nextBlockedStock,
+            status: getProductStatus(
+              nextAvailableQuantity,
+              orderItem.product.minimumStock,
+            ),
+          },
+        });
+
+        await closeStockBlockTimeline({
+          client: tx,
+          orderId: orderItem.orderId,
+          orderItemId: orderItem.id,
+          productId: orderItem.productId,
+          quantity: quantityToRelease,
+          currentUser,
+          status: "RELEASED",
+          releaseReason: "ORDER_QUANTITY_ADJUSTED",
+          notes: `${quantityToRelease} quantity released because approved order quantity was adjusted.`,
+        });
+      }
+
+      await tx.orderItem.update({
+        where: {
+          id: orderItem.id,
+        },
+        data: {
+          requestedQuantity: dealerRequestedQuantity,
+          quantity: newQuantity,
+          blockedQuantity: nextBlockedQuantity,
+        },
+      });
+
+      const orderItems = await tx.orderItem.findMany({
+        where: {
+          orderId: orderItem.orderId,
+        },
+      });
+
+      const requestedTotal = orderItems.reduce(
+        (total, item) => total + item.quantity,
+        0,
+      );
+      const blockedTotal = orderItems.reduce(
+        (total, item) => total + item.blockedQuantity,
+        0,
+      );
+      const deliveredTotal = orderItems.reduce(
+        (total, item) => total + (item.deliveredQuantity ?? 0),
+        0,
+      );
+      const cancelledTotal = orderItems.reduce(
+        (total, item) => total + (item.cancelledQuantity ?? 0),
+        0,
+      );
+
+      const nextStatus = calculateNextOpenOrderStatus({
+        currentStatus: orderItem.order.status,
+        requested: requestedTotal,
+        blocked: blockedTotal,
+        delivered: deliveredTotal,
+        cancelled: cancelledTotal,
+      });
+
+      await tx.order.update({
+        where: {
+          id: orderItem.orderId,
+        },
+        data: {
+          status: nextStatus,
+        },
+      });
+
+      await recordOrderStatusHistory({
+        client: tx as unknown as HistoryClient,
         orderId: orderItem.orderId,
-      },
-    });
+        fromStatus: orderItem.order.status,
+        toStatus: nextStatus,
+        title: "Order Quantity Adjusted",
+        description: `${orderItem.product.name} approved quantity changed from ${orderItem.quantity} to ${newQuantity}. Dealer requested quantity is ${dealerRequestedQuantity}.${
+          quantityToRelease > 0
+            ? ` ${quantityToRelease} blocked quantity released back to available stock.`
+            : ""
+        }`,
+        currentUser,
+      });
+    })
+    .catch((error) => {
+      if (error instanceof Error) {
+        if (error.message === "ORDER_ITEM_NOT_FOUND") {
+          redirect("/internal/dispatch?error=order-item-not-found");
+        }
 
-    const requestedTotal = orderItems.reduce(
-      (total, item) => total + item.quantity,
-      0
-    );
-    const blockedTotal = orderItems.reduce(
-      (total, item) => total + item.blockedQuantity,
-      0
-    );
-    const deliveredTotal = orderItems.reduce(
-      (total, item) => total + (item.deliveredQuantity ?? 0),
-      0
-    );
-    const cancelledTotal = orderItems.reduce(
-      (total, item) => total + (item.cancelledQuantity ?? 0),
-      0
-    );
+        if (error.message === "INVALID_STATUS") {
+          redirect("/internal/dispatch?error=invalid-status");
+        }
 
-    const nextStatus = calculateNextOpenOrderStatus({
-      currentStatus: orderItem.order.status,
-      requested: requestedTotal,
-      blocked: blockedTotal,
-      delivered: deliveredTotal,
-      cancelled: cancelledTotal,
-    });
+        if (error.message === "INVALID_ADJUST_QUANTITY") {
+          redirect("/internal/dispatch?error=invalid-adjust-quantity");
+        }
 
-    await tx.order.update({
-      where: {
-        id: orderItem.orderId,
-      },
-      data: {
-        status: nextStatus,
-      },
-    });
-
-    await recordOrderStatusHistory({
-      client: tx as unknown as HistoryClient,
-      orderId: orderItem.orderId,
-      fromStatus: orderItem.order.status,
-      toStatus: nextStatus,
-      title: "Order Quantity Adjusted",
-      description: `${orderItem.product.name} approved quantity changed from ${orderItem.quantity} to ${newQuantity}. Dealer requested quantity is ${dealerRequestedQuantity}.${
-        quantityToRelease > 0
-          ? ` ${quantityToRelease} blocked quantity released back to available stock.`
-          : ""
-      }`,
-      currentUser,
-    });
-  }).catch((error) => {
-    if (error instanceof Error) {
-      if (error.message === "ORDER_ITEM_NOT_FOUND") {
-        redirect("/internal/dispatch?error=order-item-not-found");
+        if (error.message === "APPROVED_EXCEEDS_REQUESTED") {
+          redirect("/internal/dispatch?error=approved-exceeds-requested");
+        }
       }
 
-      if (error.message === "INVALID_STATUS") {
-        redirect("/internal/dispatch?error=invalid-status");
-      }
-
-      if (error.message === "INVALID_ADJUST_QUANTITY") {
-        redirect("/internal/dispatch?error=invalid-adjust-quantity");
-      }
-
-      if (error.message === "APPROVED_EXCEEDS_REQUESTED") {
-        redirect("/internal/dispatch?error=approved-exceeds-requested");
-      }
-    }
-
-    throw error;
-  });
+      throw error;
+    });
 
   revalidatePath("/internal/dispatch");
   revalidatePath("/internal/inventory");
@@ -358,7 +377,6 @@ export async function adjustOrderItemQuantityAction(formData: FormData) {
 
   redirect("/internal/dispatch?success=quantity-adjusted");
 }
-
 
 export async function approveRemainingQuantityAction(formData: FormData) {
   const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
@@ -377,6 +395,7 @@ export async function approveRemainingQuantityAction(formData: FormData) {
     OrderStatus.BACKORDERED,
     OrderStatus.PARTIALLY_DELIVERED,
     OrderStatus.DELIVERED,
+    OrderStatus.INVOICE_UPLOADED,
   ];
 
   await prisma
@@ -404,23 +423,23 @@ export async function approveRemainingQuantityAction(formData: FormData) {
 
       const existingApprovedTotal = order.items.reduce(
         (total, item) => total + item.quantity,
-        0
+        0,
       );
       const existingBlockedTotal = order.items.reduce(
         (total, item) => total + item.blockedQuantity,
-        0
+        0,
       );
       const existingDeliveredTotal = order.items.reduce(
         (total, item) => total + (item.deliveredQuantity ?? 0),
-        0
+        0,
       );
       const existingCancelledTotal = order.items.reduce(
         (total, item) => total + (item.cancelledQuantity ?? 0),
-        0
+        0,
       );
       const existingOpenApprovedQuantity = Math.max(
         0,
-        existingApprovedTotal - existingDeliveredTotal - existingCancelledTotal
+        existingApprovedTotal - existingDeliveredTotal - existingCancelledTotal,
       );
 
       if (existingOpenApprovedQuantity > 0 || existingBlockedTotal > 0) {
@@ -441,7 +460,7 @@ export async function approveRemainingQuantityAction(formData: FormData) {
 
         const nextApprovedQuantity = Math.max(
           item.quantity,
-          dealerRequestedQuantity
+          dealerRequestedQuantity,
         );
 
         const approvedDifference = nextApprovedQuantity - item.quantity;
@@ -472,11 +491,11 @@ export async function approveRemainingQuantityAction(formData: FormData) {
 
       const openApprovedQuantity = Math.max(
         0,
-        approvedTotalAfter - deliveredTotalAfter - cancelledTotalAfter
+        approvedTotalAfter - deliveredTotalAfter - cancelledTotalAfter,
       );
       const unblockedApprovedQuantity = Math.max(
         0,
-        openApprovedQuantity - blockedTotalAfter
+        openApprovedQuantity - blockedTotalAfter,
       );
 
       let nextStatus: OrderStatus = OrderStatus.BACKORDERED;
@@ -603,7 +622,7 @@ export async function blockOrderStockAction(formData: FormData) {
         item.blockedQuantity;
       const blockQuantity = Math.min(
         Math.max(0, requiredQuantity),
-        item.product.quantity
+        item.product.quantity,
       );
 
       totalRequested += item.quantity;
@@ -638,11 +657,24 @@ export async function blockOrderStockAction(formData: FormData) {
         },
       });
 
+      await recordStockBlockTimeline({
+        client: tx,
+        order: freshOrder,
+        item,
+        quantity: blockQuantity,
+        currentUser,
+        blockReason: "ORDER_STOCK_BLOCKED",
+        notes: `${blockQuantity} quantity of ${item.product.name} blocked for ${freshOrder.orderNumber}.`,
+      });
+
       totalBlockedNow += blockQuantity;
       totalBlockedAfter += item.blockedQuantity + blockQuantity;
     }
 
-    const openQuantity = Math.max(0, totalRequested - totalDelivered - totalCancelled);
+    const openQuantity = Math.max(
+      0,
+      totalRequested - totalDelivered - totalCancelled,
+    );
     const remainingUnblocked = Math.max(0, openQuantity - totalBlockedAfter);
 
     let nextStatus: OrderStatus = OrderStatus.STOCK_BLOCKED;
@@ -725,7 +757,7 @@ export async function markReadyForDispatchAction(formData: FormData) {
 
   const blockedQuantity = order.items.reduce(
     (total, item) => total + item.blockedQuantity,
-    0
+    0,
   );
 
   if (blockedQuantity <= 0) {
@@ -770,6 +802,7 @@ export async function assignDriverAction(formData: FormData) {
 
   const orderId = String(formData.get("orderId") ?? "");
   const driverId = String(formData.get("driverId") ?? "");
+  const transportOptionId = String(formData.get("transportOptionId") ?? "");
 
   if (!orderId) {
     redirect("/internal/dispatch?error=missing-order");
@@ -777,6 +810,10 @@ export async function assignDriverAction(formData: FormData) {
 
   if (!driverId) {
     redirect("/internal/dispatch?error=missing-driver");
+  }
+
+  if (!transportOptionId) {
+    redirect("/internal/dispatch?error=missing-transport");
   }
 
   const order = await prisma.order.findUnique({
@@ -805,26 +842,51 @@ export async function assignDriverAction(formData: FormData) {
     redirect("/internal/dispatch?error=driver-not-found");
   }
 
+  const transportOptions = await prisma.$queryRaw<
+    { id: string; name: string; isActive: boolean }[]
+  >`
+    SELECT "id", "name", "isActive"
+    FROM "TransportOption"
+    WHERE "id" = ${transportOptionId}
+    LIMIT 1
+  `;
+
+  const transportOption = transportOptions[0];
+
+  if (!transportOption || !transportOption.isActive) {
+    redirect("/internal/dispatch?error=transport-not-found");
+  }
+
   await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: {
-        id: order.id,
-      },
-      data: {
-        assignedDriverId: driver.id,
-        status: OrderStatus.TRANSPORT_ASSIGNED,
-      },
-    });
+    await tx.$executeRaw`
+      UPDATE "Order"
+      SET
+        "assignedDriverId" = ${driver.id},
+        "transportOptionId" = ${transportOption.id},
+        "transportLabel" = ${transportOption.name},
+        "signedInvoiceStatus" = 'NOT_UPLOADED',
+        "signedInvoiceUploadedAt" = NULL,
+        "status" = ${OrderStatus.TRANSPORT_ASSIGNED}::"OrderStatus",
+        "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "id" = ${order.id}
+    `;
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
       orderId: order.id,
       fromStatus: order.status,
       toStatus: OrderStatus.TRANSPORT_ASSIGNED,
-      title: "Driver Assigned",
-      description: `${driver.name} assigned for delivery.`,
+      title: "Transport Assigned",
+      description: `${driver.name} assigned for delivery via ${transportOption.name}.`,
       currentUser,
     });
+  });
+
+  await createSecurityAuditLog({
+    eventType: "TRANSPORT_ASSIGNED",
+    user: currentUser,
+    path: "/internal/dispatch",
+    description: `${order.orderNumber} assigned to ${driver.name} via ${transportOption.name}.`,
   });
 
   revalidatePath("/internal/dispatch");
@@ -834,7 +896,6 @@ export async function assignDriverAction(formData: FormData) {
 
   redirect("/internal/dispatch?success=driver-assigned");
 }
-
 
 export async function approveCancellationRequestAction(formData: FormData) {
   const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
@@ -872,21 +933,26 @@ export async function approveCancellationRequestAction(formData: FormData) {
 
   let nextStatus: OrderStatus = OrderStatus.CANCELLED;
   let releasedQuantity = 0;
+  let deliveredTotal = 0;
+  let cancelledRemainingQuantity = 0;
 
   await prisma.$transaction(async (tx) => {
-    let deliveredTotal = 0;
-
     for (const item of order.items) {
-      const deliveredQuantity = item.deliveredQuantity ?? 0;
-      const cancelledQuantity = Math.max(0, item.quantity - deliveredQuantity);
+      const closure = getCancellationClosureQuantities(item);
       const blockedQuantity = item.blockedQuantity;
 
-      deliveredTotal += deliveredQuantity;
+      // Important: delivered/consumed quantity must never be cancelled or released.
+      // Cancellation after partial delivery only closes the remaining dealer-requested quantity.
+      deliveredTotal += closure.delivered;
+      cancelledRemainingQuantity += closure.cancelled;
       releasedQuantity += blockedQuantity;
 
       if (blockedQuantity > 0) {
         const nextAvailableQuantity = item.product.quantity + blockedQuantity;
-        const nextBlockedStock = Math.max(0, item.product.blocked - blockedQuantity);
+        const nextBlockedStock = Math.max(
+          0,
+          item.product.blocked - blockedQuantity,
+        );
 
         await tx.product.update({
           where: {
@@ -897,9 +963,21 @@ export async function approveCancellationRequestAction(formData: FormData) {
             blocked: nextBlockedStock,
             status: getProductStatus(
               nextAvailableQuantity,
-              item.product.minimumStock
+              item.product.minimumStock,
             ),
           },
+        });
+
+        await closeStockBlockTimeline({
+          client: tx,
+          orderId: order.id,
+          orderItemId: item.id,
+          productId: item.productId,
+          quantity: blockedQuantity,
+          currentUser,
+          status: "RELEASED",
+          releaseReason: "CANCELLATION_APPROVED",
+          notes: `${blockedQuantity} blocked quantity released after cancellation approval. Delivered quantity, if any, stays consumed.`,
         });
       }
 
@@ -908,15 +986,18 @@ export async function approveCancellationRequestAction(formData: FormData) {
           id: item.id,
         },
         data: {
+          requestedQuantity: closure.requested,
+          quantity: closure.workingQuantity,
           blockedQuantity: 0,
-          cancelledQuantity,
+          cancelledQuantity: closure.cancelled,
         },
       });
     }
 
-    nextStatus = deliveredTotal > 0
-      ? OrderStatus.PARTIALLY_CANCELLED
-      : OrderStatus.CANCELLED;
+    nextStatus =
+      deliveredTotal > 0
+        ? OrderStatus.PARTIALLY_CANCELLED
+        : OrderStatus.CANCELLED;
 
     await tx.order.update({
       where: {
@@ -933,8 +1014,14 @@ export async function approveCancellationRequestAction(formData: FormData) {
       orderId: order.id,
       fromStatus: order.status,
       toStatus: nextStatus,
-      title: "Cancellation Approved",
-      description: `${releasedQuantity} blocked quantity released back to inventory. Order cancellation approved by internal team.`,
+      title:
+        nextStatus === OrderStatus.PARTIALLY_CANCELLED
+          ? "Remaining Quantity Cancelled"
+          : "Cancellation Approved",
+      description:
+        nextStatus === OrderStatus.PARTIALLY_CANCELLED
+          ? `${deliveredTotal} quantity was already delivered and stays consumed. ${cancelledRemainingQuantity} remaining quantity was cancelled/closed. ${releasedQuantity} blocked quantity released back to inventory.`
+          : `${cancelledRemainingQuantity} quantity cancelled. ${releasedQuantity} blocked quantity released back to inventory.`,
       currentUser,
     });
   });

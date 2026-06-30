@@ -5,6 +5,10 @@ type RawOrderRow = {
   orderNumber: string;
   dealerId: string;
   assignedDriverId: string | null;
+  transportOptionId: string | null;
+  transportLabel: string | null;
+  signedInvoiceStatus: string;
+  signedInvoiceUploadedAt: Date | string | null;
   status: string;
   notes: string | null;
   createdAt: Date | string;
@@ -23,6 +27,8 @@ type RawOrderRow = {
   assignedDriverStatus: string | null;
   assignedDriverCreatedAt: Date | string | null;
   assignedDriverUpdatedAt: Date | string | null;
+  transportOptionName: string | null;
+  transportOptionDescription: string | null;
 };
 
 type RawOrderItemRow = {
@@ -69,6 +75,10 @@ export async function getOrdersWithRelations({
         o."orderNumber",
         o."dealerId",
         o."assignedDriverId",
+        o."transportOptionId",
+        o."transportLabel",
+        o."signedInvoiceStatus",
+        o."signedInvoiceUploadedAt",
         o."status",
         o."notes",
         o."createdAt",
@@ -86,10 +96,13 @@ export async function getOrdersWithRelations({
         driver."role" AS "assignedDriverRole",
         driver."status" AS "assignedDriverStatus",
         driver."createdAt" AS "assignedDriverCreatedAt",
-        driver."updatedAt" AS "assignedDriverUpdatedAt"
+        driver."updatedAt" AS "assignedDriverUpdatedAt",
+        transport."name" AS "transportOptionName",
+        transport."description" AS "transportOptionDescription"
       FROM "Order" o
       INNER JOIN "User" dealer ON dealer."id" = o."dealerId"
       LEFT JOIN "User" driver ON driver."id" = o."assignedDriverId"
+      LEFT JOIN "TransportOption" transport ON transport."id" = o."transportOptionId"
       ${where}
       ORDER BY ${orderBy}
       ${typeof limit === "number" ? `LIMIT ${limit}` : ""}
@@ -165,6 +178,10 @@ function mapOrderRow(row: RawOrderRow) {
     orderNumber: row.orderNumber,
     dealerId: row.dealerId,
     assignedDriverId: row.assignedDriverId,
+    transportOptionId: row.transportOptionId,
+    transportLabel: row.transportLabel,
+    signedInvoiceStatus: row.signedInvoiceStatus,
+    signedInvoiceUploadedAt: row.signedInvoiceUploadedAt ? new Date(row.signedInvoiceUploadedAt) : null,
     status: row.status,
     notes: row.notes,
     createdAt: new Date(row.createdAt),
@@ -179,6 +196,13 @@ function mapOrderRow(row: RawOrderRow) {
       createdAt: new Date(row.dealerCreatedAt),
       updatedAt: new Date(row.dealerUpdatedAt),
     },
+    transportOption: row.transportOptionId
+      ? {
+          id: row.transportOptionId,
+          name: row.transportOptionName ?? row.transportLabel ?? "Transport",
+          description: row.transportOptionDescription,
+        }
+      : null,
     assignedDriver: row.assignedDriverId
       ? {
           id: row.assignedDriverId,

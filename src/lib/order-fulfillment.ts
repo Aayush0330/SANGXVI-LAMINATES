@@ -12,6 +12,26 @@ export type OrderDisplayItem = {
   };
 };
 
+export function getCancellationClosureQuantities(
+  item: Pick<
+    FulfillmentItem,
+    "requestedQuantity" | "quantity" | "deliveredQuantity"
+  >
+) {
+  const requested =
+    item.requestedQuantity && item.requestedQuantity > 0
+      ? item.requestedQuantity
+      : item.quantity;
+  const delivered = Math.max(0, item.deliveredQuantity ?? 0);
+
+  return {
+    requested,
+    delivered,
+    cancelled: Math.max(0, requested - delivered),
+    workingQuantity: Math.max(item.quantity, requested),
+  };
+}
+
 export function getOrderDisplayName(items: OrderDisplayItem[]) {
   const firstProductName = items[0]?.product.name;
 
@@ -105,7 +125,7 @@ export function getOrderStatusLabel(status: string) {
     PARTIALLY_DELIVERED: "Partially Delivered",
     DELIVERED: "Delivered",
     INVOICE_UPLOADED: "Invoice Uploaded",
-    PARTIALLY_CANCELLED: "Partially Cancelled",
+    PARTIALLY_CANCELLED: "Partially Cancelled / Closed",
     CANCELLED: "Cancelled",
   };
 
@@ -120,7 +140,7 @@ export function getOrderStatusLabel(status: string) {
 }
 
 export function getDarkOrderStatusClass(status: string) {
-  if (status === "DELIVERED") {
+  if (status === "DELIVERED" || status === "INVOICE_UPLOADED") {
     return "bg-emerald-300/10 text-emerald-300";
   }
 
@@ -172,7 +192,7 @@ export function getDarkOrderStatusClass(status: string) {
 }
 
 export function getLightOrderStatusClass(status: string) {
-  if (status === "DELIVERED") {
+  if (status === "DELIVERED" || status === "INVOICE_UPLOADED") {
     return "bg-emerald-100 text-emerald-700";
   }
 

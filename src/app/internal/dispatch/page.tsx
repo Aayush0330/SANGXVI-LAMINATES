@@ -21,6 +21,24 @@ import {
   markStockCheckedAction,
 } from "./actions";
 
+type DeliveryProofRow = {
+  id: string;
+  orderId: string;
+  uploadedByName: string | null;
+  proofType: string;
+  fileName: string;
+  mimeType: string;
+  note: string | null;
+  uploadedAt: Date | string;
+};
+
+
+type TransportOptionRow = {
+  id: string;
+  name: string;
+  description: string | null;
+};
+
 function SelectArrow() {
   return (
     <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center">
@@ -47,8 +65,51 @@ function formatDate(date: Date) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Kolkata",
   }).format(date);
 }
+
+function formatDateTime(date: Date | string | null) {
+  if (!date) return "—";
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  }).format(new Date(date));
+}
+
+function getBlockStatusClass(status: string) {
+  if (status === "ACTIVE") {
+    return "bg-cyan-300/10 text-cyan-300 ring-1 ring-cyan-300/20";
+  }
+
+  if (status === "CONSUMED") {
+    return "bg-emerald-300/10 text-emerald-300 ring-1 ring-emerald-300/20";
+  }
+
+  return "bg-slate-300/10 text-slate-300 ring-1 ring-slate-300/20";
+}
+
+type DispatchStockBlockRow = {
+  id: string;
+  orderId: string;
+  orderItemId: string;
+  productCode: string;
+  productName: string;
+  productStack: string;
+  quantity: number;
+  status: string;
+  blockReason: string;
+  releaseReason: string | null;
+  blockedAt: Date | string;
+  releasedAt: Date | string | null;
+  blockedByName: string | null;
+  releasedByName: string | null;
+};
 
 function getDispatchMessage(error?: string, success?: string) {
   if (success === "stock-checked") {
@@ -103,14 +164,14 @@ function getDispatchMessage(error?: string, success?: string) {
   if (success === "driver-assigned") {
     return {
       type: "success",
-      text: "Driver assigned successfully. The order is now visible in the field delivery portal.",
+      text: "Transport and driver assigned successfully. The order is now visible in the field delivery portal.",
     };
   }
 
   if (success === "cancellation-approved") {
     return {
       type: "success",
-      text: "Cancellation approved and blocked stock released successfully.",
+      text: "Cancellation approved. Delivered stock stays consumed; only remaining/blocked quantity was closed or released.",
     };
   }
 
@@ -177,6 +238,20 @@ function getDispatchMessage(error?: string, success?: string) {
     };
   }
 
+  if (error === "missing-transport") {
+    return {
+      type: "error",
+      text: "Please select a transport option before assigning dispatch.",
+    };
+  }
+
+  if (error === "transport-not-found") {
+    return {
+      type: "error",
+      text: "Selected transport option was not found or is disabled.",
+    };
+  }
+
   if (error === "driver-not-found") {
     return {
       type: "error",
@@ -233,7 +308,6 @@ function canMarkReady(status: string, blockedQuantity: number) {
   );
 }
 
-
 function canAdjustQuantity(status: string) {
   return [
     "NEW_ORDER",
@@ -262,7 +336,7 @@ function canApproveRemainingQuantity({
     pending <= 0 &&
     blocked <= 0 &&
     delivered > 0 &&
-    ["PARTIALLY_DELIVERED", "DELIVERED"].includes(status)
+    ["PARTIALLY_DELIVERED", "DELIVERED", "INVOICE_UPLOADED"].includes(status)
   );
 }
 
@@ -290,7 +364,7 @@ export default async function DispatchPage({
     );
   }
 
-  const [orders, drivers] = await Promise.all([
+  const [orders, drivers, transportOptions] = await Promise.all([
     getOrdersWithRelations(),
 
     prisma.user.findMany({
@@ -302,16 +376,102 @@ export default async function DispatchPage({
         name: "asc",
       },
     }),
+
+    prisma.$queryRaw<TransportOptionRow[]>`
+      SELECT "id", "name", "description"
+      FROM "TransportOption"
+      WHERE "isActive" = true
+      ORDER BY "sortOrder" ASC, "name" ASC
+    `,
   ]);
 
-  const statusHistoryMap = await getOrderStatusHistoryMap(
-    prisma,
-    orders.map((order) => order.id)
-  );
+  const orderIds = orders.map((order) => order.id);
+
+  const statusHistoryMap = await getOrderStatusHistoryMap(prisma, orderIds);
+
+  const stockBlockRows =
+    orderIds.length > 0
+      ? await prisma.$queryRawUnsafe<DispatchStockBlockRow[]>(
+          `
+            SELECT
+              sbt."id",
+              sbt."orderId",
+              sbt."orderItemId",
+              p."code" AS "productCode",
+              p."name" AS "productName",
+              p."stack" AS "productStack",
+              sbt."quantity",
+              sbt."status",
+              sbt."blockReason",
+              sbt."releaseReason",
+              sbt."blockedAt",
+              sbt."releasedAt",
+              sbt."blockedByName",
+              sbt."releasedByName"
+            FROM "StockBlockTimeline" sbt
+            INNER JOIN "Product" p ON p."id" = sbt."productId"
+            WHERE sbt."orderId" IN (${orderIds.map((_, index) => `$${index + 1}`).join(", ")})
+            ORDER BY sbt."blockedAt" DESC
+          `,
+          ...orderIds,
+        )
+      : [];
+
+  const stockBlockTimelineByOrderId = new Map<
+    string,
+    DispatchStockBlockRow[]
+  >();
+
+  for (const row of stockBlockRows) {
+    const existingRows = stockBlockTimelineByOrderId.get(row.orderId);
+
+    if (existingRows) {
+      existingRows.push(row);
+      continue;
+    }
+
+    stockBlockTimelineByOrderId.set(row.orderId, [row]);
+  }
+
+  const deliveryProofRows =
+    orderIds.length > 0
+      ? await prisma.$queryRawUnsafe<DeliveryProofRow[]>(
+          `
+            SELECT
+              dp."id",
+              dp."orderId",
+              uploader."name" AS "uploadedByName",
+              dp."proofType",
+              dp."fileName",
+              dp."mimeType",
+              dp."note",
+              dp."uploadedAt"
+            FROM "DeliveryProof" dp
+            LEFT JOIN "User" uploader ON uploader."id" = dp."uploadedById"
+            WHERE dp."orderId" IN (${orderIds.map((_, index) => `$${index + 1}`).join(", ")})
+            ORDER BY dp."uploadedAt" DESC
+          `,
+          ...orderIds,
+        )
+      : [];
+
+  const deliveryProofsByOrderId = new Map<string, DeliveryProofRow[]>();
+
+  for (const proof of deliveryProofRows) {
+    const existingProofs = deliveryProofsByOrderId.get(proof.orderId);
+
+    if (existingProofs) {
+      existingProofs.push(proof);
+      continue;
+    }
+
+    deliveryProofsByOrderId.set(proof.orderId, [proof]);
+  }
 
   const ordersWithHistory = orders.map((order) => ({
     ...order,
     statusHistory: statusHistoryMap.get(order.id) ?? [],
+    deliveryProofs: deliveryProofsByOrderId.get(order.id) ?? [],
   }));
 
   const stats = [
@@ -323,23 +483,27 @@ export default async function DispatchPage({
       label: "Backordered",
       value: String(
         ordersWithHistory.filter((order) => order.status === "BACKORDERED")
-          .length
+          .length,
       ),
     },
     {
       label: "Partial",
       value: String(
         ordersWithHistory.filter((order) =>
-          ["PARTIALLY_BLOCKED", "PARTIALLY_DELIVERED"].includes(order.status)
-        ).length
+          [
+            "PARTIALLY_BLOCKED",
+            "PARTIALLY_DELIVERED",
+            "PARTIALLY_CANCELLED",
+          ].includes(order.status),
+        ).length,
       ),
     },
     {
       label: "Ready / QC",
       value: String(
         ordersWithHistory.filter((order) =>
-          ["READY_FOR_DISPATCH", "QC_APPROVED"].includes(order.status)
-        ).length
+          ["READY_FOR_DISPATCH", "QC_APPROVED"].includes(order.status),
+        ).length,
       ),
     },
   ];
@@ -417,6 +581,7 @@ export default async function DispatchPage({
           <div className="divide-y divide-white/10">
             {ordersWithHistory.map((order) => {
               const summary = getOrderFulfillmentSummary(order.items);
+              const blockRows = stockBlockTimelineByOrderId.get(order.id) ?? [];
 
               return (
                 <div key={order.id} className="p-4 sm:p-6">
@@ -429,7 +594,7 @@ export default async function DispatchPage({
 
                         <span
                           className={`rounded-full px-3 py-1 text-xs font-semibold ${getDarkOrderStatusClass(
-                            order.status
+                            order.status,
                           )}`}
                         >
                           {getOrderStatusLabel(order.status)}
@@ -449,6 +614,9 @@ export default async function DispatchPage({
                         {order.assignedDriver
                           ? ` · Driver: ${order.assignedDriver.name}`
                           : ""}
+                        {order.transportLabel
+                          ? ` · Transport: ${order.transportLabel}`
+                          : ""}
                       </p>
 
                       {order.notes && (
@@ -458,7 +626,7 @@ export default async function DispatchPage({
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
                       <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
                         <p className="text-xs text-slate-500">Requested</p>
                         <p className="mt-1 text-lg font-bold text-white">
@@ -477,6 +645,13 @@ export default async function DispatchPage({
                         <p className="text-xs text-slate-500">Delivered</p>
                         <p className="mt-1 text-lg font-bold text-emerald-300">
                           {summary.delivered}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
+                        <p className="text-xs text-slate-500">Cancelled</p>
+                        <p className="mt-1 text-lg font-bold text-red-300">
+                          {summary.cancelled}
                         </p>
                       </div>
 
@@ -514,7 +689,7 @@ export default async function DispatchPage({
                             </p>
                           </div>
 
-                          <div className="mt-4 grid grid-cols-2 gap-2 min-[420px]:grid-cols-4">
+                          <div className="mt-4 grid grid-cols-2 gap-2 min-[420px]:grid-cols-5">
                             <div className="rounded-xl bg-white/[0.04] p-2">
                               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                                 Dealer Req
@@ -544,6 +719,15 @@ export default async function DispatchPage({
 
                             <div className="rounded-xl bg-white/[0.04] p-2">
                               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                                Cancel
+                              </p>
+                              <p className="mt-1 text-xs font-bold text-red-300">
+                                {itemSummary.cancelled}
+                              </p>
+                            </div>
+
+                            <div className="rounded-xl bg-white/[0.04] p-2">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                                 Pending
                               </p>
                               <p className="mt-1 text-xs font-bold text-yellow-300">
@@ -557,31 +741,27 @@ export default async function DispatchPage({
                   </div>
 
                   <div className="mt-5 hidden overflow-x-auto rounded-2xl border border-white/10 lg:block">
-                    <table className="w-full min-w-[880px] table-fixed text-left text-sm">
+                    <table className="w-full min-w-[980px] table-fixed text-left text-sm">
                       <colgroup>
-                        <col className="w-[30%]" />
+                        <col className="w-[26%]" />
+                        <col className="w-[9%]" />
+                        <col className="w-[11%]" />
+                        <col className="w-[11%]" />
+                        <col className="w-[11%]" />
+                        <col className="w-[11%]" />
+                        <col className="w-[11%]" />
                         <col className="w-[10%]" />
-                        <col className="w-[12%]" />
-                        <col className="w-[12%]" />
-                        <col className="w-[12%]" />
-                        <col className="w-[12%]" />
-                        <col className="w-[12%]" />
                       </colgroup>
 
                       <thead className="bg-white/[0.04] text-slate-300">
                         <tr>
                           <th className="px-4 py-3 font-semibold">Product</th>
                           <th className="px-4 py-3 font-semibold">Stack</th>
-                          <th className="px-4 py-3 font-semibold">
-                            Available
-                          </th>
-                          <th className="px-4 py-3 font-semibold">
-                            Requested
-                          </th>
+                          <th className="px-4 py-3 font-semibold">Available</th>
+                          <th className="px-4 py-3 font-semibold">Requested</th>
                           <th className="px-4 py-3 font-semibold">Blocked</th>
-                          <th className="px-4 py-3 font-semibold">
-                            Delivered
-                          </th>
+                          <th className="px-4 py-3 font-semibold">Delivered</th>
+                          <th className="px-4 py-3 font-semibold">Cancelled</th>
                           <th className="px-4 py-3 font-semibold">Pending</th>
                         </tr>
                       </thead>
@@ -622,6 +802,10 @@ export default async function DispatchPage({
                               </td>
 
                               <td className="px-4 py-4">
+                                {itemSummary.cancelled}
+                              </td>
+
+                              <td className="px-4 py-4">
                                 {itemSummary.pending}
                               </td>
                             </tr>
@@ -631,6 +815,128 @@ export default async function DispatchPage({
                     </table>
                   </div>
 
+                  {blockRows.length > 0 && (
+                    <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.06] p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="text-sm font-bold text-cyan-200">
+                            Stock Blocking Timeline
+                          </h4>
+                          <p className="mt-1 text-xs leading-5 text-slate-400">
+                            Product-wise blocking and release history for this
+                            order.
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold text-slate-300">
+                          {
+                            blockRows.filter((row) => row.status === "ACTIVE")
+                              .length
+                          }{" "}
+                          active blocks
+                        </span>
+                      </div>
+
+                      <div className="mt-4 grid gap-3">
+                        {blockRows.map((row) => (
+                          <div
+                            key={row.id}
+                            className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/50 p-3 md:grid-cols-[minmax(0,1fr)_90px_120px_1fr] md:items-center"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-bold text-white">
+                                {row.productName}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {row.productCode} · Stack {row.productStack}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                                Qty
+                              </p>
+                              <p className="mt-1 text-sm font-bold text-cyan-300">
+                                {row.quantity}
+                              </p>
+                            </div>
+
+                            <div>
+                              <span
+                                className={`inline-flex rounded-full px-3 py-1 text-[11px] font-bold ${getBlockStatusClass(row.status)}`}
+                              >
+                                {row.status}
+                              </span>
+                            </div>
+
+                            <div className="min-w-0 text-xs leading-5 text-slate-400">
+                              <p>
+                                Blocked:{" "}
+                                <span className="text-slate-200">
+                                  {formatDateTime(row.blockedAt)}
+                                </span>
+                                {row.blockedByName
+                                  ? ` by ${row.blockedByName}`
+                                  : ""}
+                              </p>
+                              <p>
+                                Closed:{" "}
+                                <span className="text-slate-200">
+                                  {formatDateTime(row.releasedAt)}
+                                </span>
+                                {row.releaseReason
+                                  ? ` · ${row.releaseReason.replaceAll("_", " ")}`
+                                  : " · Active"}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(order.deliveryProofs.length > 0 || ["DELIVERED", "PARTIALLY_DELIVERED", "INVOICE_UPLOADED"].includes(order.status)) && (
+                    <div className="mt-5 rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.06] p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="text-sm font-bold text-emerald-200">
+                            Signed Duplicate Invoice Proof
+                          </h4>
+                          <p className="mt-1 text-xs leading-5 text-slate-400">
+                            Delivery proof uploaded by driver/transport after successful delivery.
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.signedInvoiceStatus === "UPLOADED" ? "bg-emerald-300/10 text-emerald-300" : "bg-yellow-300/10 text-yellow-300"}`}>
+                          {order.signedInvoiceStatus === "UPLOADED" ? "Uploaded" : "Pending"}
+                        </span>
+                      </div>
+
+                      {order.deliveryProofs.length === 0 ? (
+                        <p className="mt-4 rounded-2xl border border-yellow-300/20 bg-yellow-300/10 px-4 py-3 text-xs font-semibold text-yellow-200">
+                          Delivery completed but signed duplicate invoice proof is still pending.
+                        </p>
+                      ) : (
+                        <div className="mt-4 grid gap-3">
+                          {order.deliveryProofs.map((proof) => (
+                            <div key={proof.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-bold text-white">{proof.fileName}</p>
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    Uploaded by {proof.uploadedByName || "Driver"} · {formatDateTime(proof.uploadedAt)}
+                                  </p>
+                                  {proof.note && <p className="mt-2 text-xs leading-5 text-slate-300">{proof.note}</p>}
+                                </div>
+                                <a href={`/field/deliveries/proof/${proof.id}`} target="_blank" rel="noreferrer" className="rounded-2xl border border-emerald-300/30 px-4 py-2 text-xs font-bold text-emerald-300 transition hover:bg-emerald-300 hover:text-slate-950">
+                                  View Proof
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {inventoryControl && canAdjustQuantity(order.status) && (
                     <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -639,8 +945,11 @@ export default async function DispatchPage({
                             Adjust Approved Quantity
                           </h4>
                           <p className="mt-1 text-xs leading-5 text-slate-400">
-                            Use this when internal approved quantity needs to be reduced/increased before final dispatch. Dealer&apos;s original requested quantity stays safe.
-                            If reduced below blocked quantity, extra blocked stock will be released automatically.
+                            Use this when internal approved quantity needs to be
+                            reduced/increased before final dispatch.
+                            Dealer&apos;s original requested quantity stays
+                            safe. If reduced below blocked quantity, extra
+                            blocked stock will be released automatically.
                           </p>
                         </div>
                       </div>
@@ -668,7 +977,9 @@ export default async function DispatchPage({
                                   {item.product.name}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-500">
-                                  Approved: {item.quantity} · Blocked: {itemSummary.blocked} · Delivered: {itemSummary.delivered}
+                                  Approved: {item.quantity} · Blocked:{" "}
+                                  {itemSummary.blocked} · Delivered:{" "}
+                                  {itemSummary.delivered}
                                 </p>
                               </div>
 
@@ -715,7 +1026,6 @@ export default async function DispatchPage({
                       </form>
                     )}
 
-
                     {(inventoryControl || dispatchControl) &&
                       canApproveRemainingQuantity({
                         status: order.status,
@@ -725,7 +1035,11 @@ export default async function DispatchPage({
                         delivered: summary.delivered,
                       }) && (
                         <form action={approveRemainingQuantityAction}>
-                          <input type="hidden" name="orderId" value={order.id} />
+                          <input
+                            type="hidden"
+                            name="orderId"
+                            value={order.id}
+                          />
 
                           <button
                             type="submit"
@@ -741,7 +1055,10 @@ export default async function DispatchPage({
                       summary.pending > 0 &&
                       summary.blocked <= 0 && (
                         <div className="rounded-2xl border border-yellow-300/20 bg-yellow-300/10 px-5 py-3 text-sm font-semibold text-yellow-200">
-                          Approved quantity is ready to process now. Block available stock for the approved quantity first. Short quantity can be approved later after this approved quantity is delivered.
+                          Approved quantity is ready to process now. Block
+                          available stock for the approved quantity first. Short
+                          quantity can be approved later after this approved
+                          quantity is delivered.
                         </div>
                       )}
 
@@ -786,6 +1103,24 @@ export default async function DispatchPage({
                       >
                         <input type="hidden" name="orderId" value={order.id} />
 
+                        <div className="relative min-w-[240px]">
+                          <select
+                            name="transportOptionId"
+                            className="h-12 w-full appearance-none rounded-2xl border border-white/10 bg-slate-900 px-4 pr-12 text-sm text-slate-100 outline-none transition focus:border-emerald-300"
+                            required
+                          >
+                            <option value="">Select transport</option>
+
+                            {transportOptions.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.name}
+                              </option>
+                            ))}
+                          </select>
+
+                          <SelectArrow />
+                        </div>
+
                         <div className="relative min-w-[260px]">
                           <select
                             name="driverId"
@@ -808,28 +1143,38 @@ export default async function DispatchPage({
                           type="submit"
                           className="rounded-2xl bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"
                         >
-                          Assign Driver
+                          Assign Transport
                         </button>
                       </form>
                     )}
 
-                    {dispatchControl && order.status === "CANCELLATION_REQUESTED" && (
-                      <form action={approveCancellationRequestAction}>
-                        <input type="hidden" name="orderId" value={order.id} />
+                    {dispatchControl &&
+                      order.status === "CANCELLATION_REQUESTED" && (
+                        <form action={approveCancellationRequestAction}>
+                          <input
+                            type="hidden"
+                            name="orderId"
+                            value={order.id}
+                          />
 
-                        <button
-                          type="submit"
-                          className="rounded-2xl bg-red-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-red-200"
-                        >
-                          Approve Cancellation & Release Stock
-                        </button>
-                      </form>
-                    )}
-
+                          <button
+                            type="submit"
+                            className="rounded-2xl bg-red-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-red-200"
+                          >
+                            {summary.delivered > 0
+                              ? "Approve Remaining Cancellation"
+                              : "Approve Cancellation & Release Stock"}
+                          </button>
+                        </form>
+                      )}
 
                     {!inventoryControl &&
                       !dispatchControl &&
-                      !["DELIVERED", "CANCELLED"].includes(order.status) && (
+                      ![
+                        "DELIVERED",
+                        "CANCELLED",
+                        "PARTIALLY_CANCELLED",
+                      ].includes(order.status) && (
                         <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-slate-300">
                           Waiting for responsible team action.
                         </div>
@@ -843,7 +1188,9 @@ export default async function DispatchPage({
 
                     {order.status === "CANCELLATION_REQUESTED" && (
                       <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-5 py-3 text-sm font-semibold text-amber-300">
-                        Dealer requested cancellation. Dispatch team can approve and release blocked stock.
+                        Dealer requested cancellation. Delivered/consumed
+                        quantity will stay consumed. Only remaining or active
+                        blocked quantity will be cancelled/released.
                       </div>
                     )}
 
@@ -866,9 +1213,19 @@ export default async function DispatchPage({
                       </div>
                     )}
 
+                    {order.status === "PARTIALLY_CANCELLED" && (
+                      <div className="rounded-2xl border border-red-300/20 bg-red-300/10 px-5 py-3 text-sm font-semibold text-red-200">
+                        Order is closed after partial delivery. Delivered
+                        quantity stays consumed, and the remaining
+                        dealer-requested quantity is cancelled/closed.
+                      </div>
+                    )}
+
                     {order.status === "DELIVERED" && (
                       <div className="rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-5 py-3 text-sm font-semibold text-emerald-300">
-                        Approved quantity delivered successfully. If short quantity exists, approve remaining quantity to continue the same order.
+                        Approved quantity delivered successfully. If short
+                        quantity exists, approve remaining quantity to continue
+                        the same order.
                       </div>
                     )}
                   </div>
@@ -878,6 +1235,15 @@ export default async function DispatchPage({
           </div>
         )}
       </div>
+
+      {transportOptions.length === 0 && (
+        <div className="mt-8 rounded-3xl border border-yellow-300/20 bg-yellow-300/10 p-6 text-yellow-200">
+          <h2 className="text-lg font-bold">No active transport options found</h2>
+          <p className="mt-2 text-sm leading-6">
+            Add active transport options from Transport before assigning dispatch.
+          </p>
+        </div>
+      )}
 
       {drivers.length === 0 && (
         <div className="mt-8 rounded-3xl border border-yellow-300/20 bg-yellow-300/10 p-6 text-yellow-200">

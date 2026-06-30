@@ -52,7 +52,6 @@ function formatDate(date: Date) {
   }).format(date);
 }
 
-
 function canDealerCancelDirectly(status: string) {
   return ["NEW_ORDER", "STOCK_CHECKED", "BACKORDERED"].includes(status);
 }
@@ -74,15 +73,24 @@ function getDealerOrderMessage(error?: string, success?: string) {
   }
 
   if (success === "cancellation-requested") {
-    return { type: "success", text: "Cancellation request sent to internal team." };
+    return {
+      type: "success",
+      text: "Cancellation request sent to internal team.",
+    };
   }
 
   if (error === "cancel-not-allowed") {
-    return { type: "error", text: "This order cannot be cancelled at the current stage." };
+    return {
+      type: "error",
+      text: "This order cannot be cancelled at the current stage.",
+    };
   }
 
   if (error === "permission-denied") {
-    return { type: "error", text: "You do not have permission to cancel this order." };
+    return {
+      type: "error",
+      text: "You do not have permission to cancel this order.",
+    };
   }
 
   if (error === "order-not-found") {
@@ -108,7 +116,7 @@ async function getDealerOrders(dealerId: string) {
       WHERE "dealerId" = $1
       ORDER BY "createdAt" DESC
     `,
-    dealerId
+    dealerId,
   );
 
   if (orderRows.length === 0) {
@@ -143,10 +151,13 @@ async function getDealerOrders(dealerId: string) {
       WHERE oi."orderId" IN (${placeholders})
       ORDER BY oi."createdAt" ASC
     `,
-    ...orderRows.map((order) => order.id)
+    ...orderRows.map((order) => order.id),
   );
 
-  const itemsByOrderId = new Map<string, ReturnType<typeof mapDealerOrderItem>[]>();
+  const itemsByOrderId = new Map<
+    string,
+    ReturnType<typeof mapDealerOrderItem>[]
+  >();
 
   for (const itemRow of itemRows) {
     const item = mapDealerOrderItem(itemRow);
@@ -207,7 +218,7 @@ export default async function DealerOrdersPage({
   const message = getDealerOrderMessage(params?.error, params?.success);
 
   const { currentUser, hasAccess } = await checkPermission(
-    "track_dealer_orders"
+    "track_dealer_orders",
   );
 
   if (!hasAccess) {
@@ -242,7 +253,7 @@ export default async function DealerOrdersPage({
 
   const statusHistoryMap = await getOrderStatusHistoryMap(
     prisma,
-    orders.map((order) => order.id)
+    orders.map((order) => order.id),
   );
 
   const ordersWithHistory = orders.map((order) => ({
@@ -259,22 +270,30 @@ export default async function DealerOrdersPage({
       label: "Active Orders",
       value: String(
         ordersWithHistory.filter(
-          (order) => order.status !== "DELIVERED" && order.status !== "CANCELLED"
-        ).length
+          (order) =>
+            !["DELIVERED", "CANCELLED", "PARTIALLY_CANCELLED"].includes(
+              order.status,
+            ),
+        ).length,
       ),
     },
     {
       label: "Partial Orders",
       value: String(
         ordersWithHistory.filter((order) =>
-          ["PARTIALLY_BLOCKED", "PARTIALLY_DELIVERED"].includes(order.status)
-        ).length
+          [
+            "PARTIALLY_BLOCKED",
+            "PARTIALLY_DELIVERED",
+            "PARTIALLY_CANCELLED",
+          ].includes(order.status),
+        ).length,
       ),
     },
     {
       label: "Delivered",
       value: String(
-        ordersWithHistory.filter((order) => order.status === "DELIVERED").length
+        ordersWithHistory.filter((order) => order.status === "DELIVERED")
+          .length,
       ),
     },
   ];
@@ -373,7 +392,7 @@ export default async function DealerOrdersPage({
 
                         <span
                           className={`rounded-full px-3 py-1 text-xs font-semibold ${getLightOrderStatusClass(
-                            order.status
+                            order.status,
                           )}`}
                         >
                           {getOrderStatusLabel(order.status)}
@@ -524,13 +543,9 @@ export default async function DealerOrdersPage({
                           <th className="px-4 py-3 font-semibold">
                             Dealer Req.
                           </th>
-                          <th className="px-4 py-3 font-semibold">
-                            Approved
-                          </th>
+                          <th className="px-4 py-3 font-semibold">Approved</th>
                           <th className="px-4 py-3 font-semibold">Blocked</th>
-                          <th className="px-4 py-3 font-semibold">
-                            Delivered
-                          </th>
+                          <th className="px-4 py-3 font-semibold">Delivered</th>
                           <th className="px-4 py-3 font-semibold">Pending</th>
                         </tr>
                       </thead>
@@ -618,8 +633,10 @@ export default async function DealerOrdersPage({
                     </div>
                   )}
 
-
-                  <OrderStatusTimeline history={order.statusHistory} theme="light" />
+                  <OrderStatusTimeline
+                    history={order.statusHistory}
+                    theme="light"
+                  />
                 </div>
               );
             })}

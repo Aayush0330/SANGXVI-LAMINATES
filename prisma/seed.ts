@@ -153,6 +153,18 @@ async function main() {
     });
   }
 
+
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO "TransportOption" ("id", "name", "description", "isActive", "sortOrder", "createdAt", "updatedAt") VALUES
+      ('transport_auto', 'Auto', 'Local auto delivery.', true, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+      ('transport_tempo', 'Tempo', 'Tempo / mini truck delivery.', true, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+      ('transport_truck', 'Truck', 'Large truck dispatch.', true, 30, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+      ('transport_own_vehicle', 'Own Vehicle', 'Company owned vehicle.', true, 40, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+      ('transport_courier', 'Courier', 'Courier / third-party parcel service.', true, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+      ('transport_other', 'Other', 'Custom transport option.', true, 99, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT ("name") DO NOTHING;
+  `);
+
   console.log("Demo seed completed.");
   console.log(`Default demo password: ${defaultPassword}`);
 }

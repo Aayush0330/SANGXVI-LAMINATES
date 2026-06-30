@@ -61,6 +61,11 @@ enum SecurityEventType {
   ATTENDANCE_PUNCH
   ATTENDANCE_BREAK
   ATTENDANCE_BLOCKED
+  TRANSPORT_OPTION_CREATED
+  TRANSPORT_OPTION_UPDATED
+  TRANSPORT_OPTION_DISABLED
+  TRANSPORT_ASSIGNED
+  DELIVERY_PROOF_UPLOADED
 }
 
 model User {
@@ -82,6 +87,11 @@ model User {
   officeAttendanceRecords  OfficeAttendance[]        @relation("OfficeAttendanceUser")
   officeAttendanceEvents   OfficeAttendanceEvent[]   @relation("OfficeAttendanceEventUser")
   officeAttendanceAttempts OfficeAttendanceAttempt[] @relation("OfficeAttendanceAttemptUser")
+  stockBlocksCreated       StockBlockTimeline[]      @relation("StockBlockTimelineBlockedBy")
+  stockBlocksReleased      StockBlockTimeline[]      @relation("StockBlockTimelineReleasedBy")
+  transportOptionsCreated  TransportOption[]         @relation("TransportOptionCreatedBy")
+  transportOptionsUpdated  TransportOption[]         @relation("TransportOptionUpdatedBy")
+  deliveryProofsUploaded   DeliveryProof[]           @relation("DeliveryProofUploadedBy")
 }
 
 model AuthSession {
@@ -130,26 +140,36 @@ model Product {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  orderItems OrderItem[]
+  orderItems          OrderItem[]
+  stockBlockTimelines StockBlockTimeline[]
 }
 
 model Order {
-  id               String      @id @default(cuid())
-  orderNumber      String      @unique
-  dealerId         String
-  assignedDriverId String?
-  status           OrderStatus @default(NEW_ORDER)
-  notes            String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  id                      String      @id @default(cuid())
+  orderNumber             String      @unique
+  dealerId                String
+  assignedDriverId        String?
+  transportOptionId       String?
+  transportLabel          String?
+  signedInvoiceStatus     String      @default("NOT_UPLOADED")
+  signedInvoiceUploadedAt DateTime?
+  status                  OrderStatus @default(NEW_ORDER)
+  notes                   String?
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
 
-  dealer         User                 @relation("DealerOrders", fields: [dealerId], references: [id])
-  assignedDriver User?                @relation("AssignedDriverOrders", fields: [assignedDriverId], references: [id])
-  items          OrderItem[]
-  statusHistory  OrderStatusHistory[]
+  dealer              User                 @relation("DealerOrders", fields: [dealerId], references: [id])
+  assignedDriver      User?                @relation("AssignedDriverOrders", fields: [assignedDriverId], references: [id])
+  transportOption     TransportOption?     @relation("OrderTransportOption", fields: [transportOptionId], references: [id], onDelete: SetNull)
+  items               OrderItem[]
+  statusHistory       OrderStatusHistory[]
+  stockBlockTimelines StockBlockTimeline[]
+  deliveryProofs      DeliveryProof[]
 
   @@index([dealerId])
   @@index([assignedDriverId])
+  @@index([transportOptionId])
+  @@index([signedInvoiceStatus])
   @@index([status])
 }
 
@@ -165,8 +185,9 @@ model OrderItem {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  order               Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product             Product              @relation(fields: [productId], references: [id])
+  stockBlockTimelines StockBlockTimeline[]
 
   @@index([orderId])
   @@index([productId])
@@ -284,4 +305,81 @@ model OfficeAttendanceAttempt {
   @@index([actionType])
   @@index([status])
   @@index([attemptedAt])
+}
+
+model StockBlockTimeline {
+  id              String    @id @default(cuid())
+  productId       String
+  orderId         String
+  orderItemId     String
+  quantity        Int
+  status          String    @default("ACTIVE")
+  blockReason     String    @default("ORDER_STOCK_BLOCKED")
+  releaseReason   String?
+  blockedAt       DateTime  @default(now()) @db.Timestamptz(6)
+  blockedUntil    DateTime? @db.Timestamptz(6)
+  releasedAt      DateTime? @db.Timestamptz(6)
+  blockedById     String?
+  blockedByName   String?
+  blockedByEmail  String?
+  releasedById    String?
+  releasedByName  String?
+  releasedByEmail String?
+  notes           String?
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem  OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  blockedBy  User?     @relation("StockBlockTimelineBlockedBy", fields: [blockedById], references: [id], onDelete: SetNull)
+  releasedBy User?     @relation("StockBlockTimelineReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([status])
+  @@index([blockedAt])
+  @@index([releasedAt])
+}
+
+model TransportOption {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  description   String?
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdById   String?
+  updatedById   String?
+  createdByName String?
+  updatedByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdBy User?   @relation("TransportOptionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?   @relation("TransportOptionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  orders    Order[] @relation("OrderTransportOption")
+
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model DeliveryProof {
+  id           String   @id @default(cuid())
+  orderId      String
+  uploadedById String?
+  proofType    String   @default("SIGNED_DUPLICATE_INVOICE")
+  fileName     String
+  mimeType     String
+  fileDataUrl  String
+  note         String?
+  uploadedAt   DateTime @default(now())
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  uploadedBy User? @relation("DeliveryProofUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([uploadedById])
+  @@index([proofType])
+  @@index([uploadedAt])
 }

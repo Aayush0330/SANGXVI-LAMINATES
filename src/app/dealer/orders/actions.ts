@@ -8,6 +8,8 @@ import {
   recordOrderStatusHistory,
   type HistoryClient,
 } from "@/lib/order-status-history";
+import { closeStockBlockTimeline } from "@/lib/stock-block-timeline";
+import { getCancellationClosureQuantities } from "@/lib/order-fulfillment";
 import { OrderStatus, ProductStatus } from "@/generated/prisma/client";
 
 const CANCELLATION_REQUESTED_STATUS = "CANCELLATION_REQUESTED" as OrderStatus;
@@ -42,9 +44,11 @@ function getProductStatus(quantity: number, minimumStock: number) {
 async function cancelOrderAndReleaseStock({
   tx,
   orderId,
+  currentUser,
 }: {
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
   orderId: string;
+  currentUser: Awaited<ReturnType<typeof checkPermission>>["currentUser"];
 }) {
   const order = await tx.order.findUnique({
     where: {
@@ -66,15 +70,17 @@ async function cancelOrderAndReleaseStock({
   let deliveredTotal = 0;
 
   for (const item of order.items) {
-    const deliveredQuantity = item.deliveredQuantity ?? 0;
-    const cancelledQuantity = Math.max(0, item.quantity - deliveredQuantity);
+    const closure = getCancellationClosureQuantities(item);
     const blockedQuantity = item.blockedQuantity;
 
-    deliveredTotal += deliveredQuantity;
+    deliveredTotal += closure.delivered;
 
     if (blockedQuantity > 0) {
       const nextAvailableQuantity = item.product.quantity + blockedQuantity;
-      const nextBlockedStock = Math.max(0, item.product.blocked - blockedQuantity);
+      const nextBlockedStock = Math.max(
+        0,
+        item.product.blocked - blockedQuantity,
+      );
 
       await tx.product.update({
         where: {
@@ -85,9 +91,21 @@ async function cancelOrderAndReleaseStock({
           blocked: nextBlockedStock,
           status: getProductStatus(
             nextAvailableQuantity,
-            item.product.minimumStock
+            item.product.minimumStock,
           ),
         },
+      });
+
+      await closeStockBlockTimeline({
+        client: tx,
+        orderId: order.id,
+        orderItemId: item.id,
+        productId: item.productId,
+        quantity: blockedQuantity,
+        currentUser,
+        status: "RELEASED",
+        releaseReason: "DEALER_DIRECT_CANCELLED",
+        notes: `${blockedQuantity} blocked quantity released after dealer cancellation. Delivered quantity, if any, stays consumed.`,
       });
     }
 
@@ -96,8 +114,10 @@ async function cancelOrderAndReleaseStock({
         id: item.id,
       },
       data: {
+        requestedQuantity: closure.requested,
+        quantity: closure.workingQuantity,
         blockedQuantity: 0,
-        cancelledQuantity,
+        cancelledQuantity: closure.cancelled,
       },
     });
   }
@@ -108,7 +128,9 @@ async function cancelOrderAndReleaseStock({
 }
 
 export async function cancelDealerOrderAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("track_dealer_orders");
+  const { currentUser, hasAccess } = await checkPermission(
+    "track_dealer_orders",
+  );
 
   if (!hasAccess) {
     redirect("/dealer/orders?error=permission-denied");
@@ -160,6 +182,7 @@ export async function cancelDealerOrderAction(formData: FormData) {
       const nextStatus = await cancelOrderAndReleaseStock({
         tx,
         orderId: order.id,
+        currentUser,
       });
 
       await tx.order.update({
@@ -178,7 +201,8 @@ export async function cancelDealerOrderAction(formData: FormData) {
         fromStatus: order.status,
         toStatus: nextStatus,
         title: "Order Cancelled by Dealer",
-        description: reason || "Dealer cancelled the order before dispatch processing.",
+        description:
+          reason || "Dealer cancelled the order before dispatch processing.",
         currentUser,
       });
     });

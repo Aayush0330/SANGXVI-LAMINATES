@@ -9,13 +9,29 @@ import {
   getOrderFulfillmentSummary,
   getOrderStatusLabel,
 } from "@/lib/order-fulfillment";
-import { markDeliveredAction, markOnTheWayAction } from "./actions";
+import {
+  markDeliveredAction,
+  markOnTheWayAction,
+  uploadSignedInvoiceProofAction,
+} from "./actions";
+
+type DeliveryProofRow = {
+  id: string;
+  orderId: string;
+  uploadedByName: string | null;
+  proofType: string;
+  fileName: string;
+  mimeType: string;
+  note: string | null;
+  uploadedAt: Date | string;
+};
 
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Kolkata",
   }).format(date);
 }
 
@@ -38,6 +54,13 @@ function getDeliveryMessage(error?: string, success?: string) {
     return {
       type: "success",
       text: "Blocked quantity delivered. Remaining quantity is now pending for the next fulfilment cycle.",
+    };
+  }
+
+  if (success === "proof-uploaded") {
+    return {
+      type: "success",
+      text: "Signed duplicate invoice proof uploaded successfully.",
     };
   }
 
@@ -80,6 +103,48 @@ function getDeliveryMessage(error?: string, success?: string) {
     return {
       type: "error",
       text: "This action is not allowed for the current delivery status.",
+    };
+  }
+
+  if (error === "missing-proof") {
+    return {
+      type: "error",
+      text: "Please upload the signed duplicate invoice photo or PDF.",
+    };
+  }
+
+  if (error === "invalid-proof-type") {
+    return {
+      type: "error",
+      text: "Only JPG, PNG, WebP, or PDF proof files are allowed.",
+    };
+  }
+
+  if (error === "proof-too-large") {
+    return {
+      type: "error",
+      text: "Proof file is too large. Please upload a file up to 3MB.",
+    };
+  }
+
+  if (error === "invalid-proof-content") {
+    return {
+      type: "error",
+      text: "The uploaded file content does not match its file type.",
+    };
+  }
+
+  if (error === "proof-note-too-long") {
+    return {
+      type: "error",
+      text: "Proof note must be 500 characters or less.",
+    };
+  }
+
+  if (error === "proof-not-allowed") {
+    return {
+      type: "error",
+      text: "Signed invoice proof can be uploaded only after delivery is completed.",
     };
   }
 
@@ -133,7 +198,7 @@ export default async function FieldDeliveriesPage({
     where: {
       assignedDriverId: driver.id,
       status: {
-        in: ["TRANSPORT_ASSIGNED", "ON_THE_WAY", "DELIVERED"],
+        in: ["TRANSPORT_ASSIGNED", "ON_THE_WAY", "PARTIALLY_DELIVERED", "DELIVERED", "INVOICE_UPLOADED"],
       },
     },
     include: {
@@ -150,14 +215,52 @@ export default async function FieldDeliveriesPage({
     },
   });
 
+  const orderIds = orders.map((order) => order.id);
+
   const statusHistoryMap = await getOrderStatusHistoryMap(
     prisma,
-    orders.map((order) => order.id)
+    orderIds
   );
+
+  const deliveryProofRows =
+    orderIds.length > 0
+      ? await prisma.$queryRawUnsafe<DeliveryProofRow[]>(
+          `
+            SELECT
+              dp."id",
+              dp."orderId",
+              uploader."name" AS "uploadedByName",
+              dp."proofType",
+              dp."fileName",
+              dp."mimeType",
+              dp."note",
+              dp."uploadedAt"
+            FROM "DeliveryProof" dp
+            LEFT JOIN "User" uploader ON uploader."id" = dp."uploadedById"
+            WHERE dp."orderId" IN (${orderIds.map((_, index) => `$${index + 1}`).join(", ")})
+            ORDER BY dp."uploadedAt" DESC
+          `,
+          ...orderIds,
+        )
+      : [];
+
+  const deliveryProofsByOrderId = new Map<string, DeliveryProofRow[]>();
+
+  for (const proof of deliveryProofRows) {
+    const existingProofs = deliveryProofsByOrderId.get(proof.orderId);
+
+    if (existingProofs) {
+      existingProofs.push(proof);
+      continue;
+    }
+
+    deliveryProofsByOrderId.set(proof.orderId, [proof]);
+  }
 
   const ordersWithHistory = orders.map((order) => ({
     ...order,
     statusHistory: statusHistoryMap.get(order.id) ?? [],
+    deliveryProofs: deliveryProofsByOrderId.get(order.id) ?? [],
   }));
 
   const stats = [
@@ -181,7 +284,7 @@ export default async function FieldDeliveriesPage({
     {
       label: "Delivered",
       value: String(
-        ordersWithHistory.filter((order) => order.status === "DELIVERED").length
+        ordersWithHistory.filter((order) => ["DELIVERED", "INVOICE_UPLOADED"].includes(order.status)).length
       ),
     },
   ];
@@ -290,6 +393,7 @@ export default async function FieldDeliveriesPage({
 
                       <p className="mt-1 text-sm text-slate-500">
                         Assigned to {order.assignedDriver?.name || driver.name}
+                        {order.transportLabel ? ` · Transport: ${order.transportLabel}` : ""}
                       </p>
 
                       <p className="mt-1 text-sm text-slate-500">
@@ -464,6 +568,66 @@ export default async function FieldDeliveriesPage({
                     </table>
                   </div>
 
+
+                  {(order.deliveryProofs.length > 0 || ["PARTIALLY_DELIVERED", "DELIVERED", "INVOICE_UPLOADED"].includes(order.status)) && (
+                    <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.06] p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="text-sm font-bold text-cyan-200">
+                            Signed Duplicate Invoice Proof
+                          </h4>
+                          <p className="mt-1 text-xs leading-5 text-slate-400">
+                            Upload the signed duplicate invoice after delivery. Image or PDF up to 3MB.
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.signedInvoiceStatus === "UPLOADED" ? "bg-emerald-300/10 text-emerald-300" : "bg-yellow-300/10 text-yellow-300"}`}>
+                          {order.signedInvoiceStatus === "UPLOADED" ? "Uploaded" : "Pending"}
+                        </span>
+                      </div>
+
+                      {order.deliveryProofs.length > 0 && (
+                        <div className="mt-4 grid gap-3">
+                          {order.deliveryProofs.map((proof) => (
+                            <div key={proof.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-bold text-white">{proof.fileName}</p>
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    Uploaded by {proof.uploadedByName || "Driver"} · {formatDate(new Date(proof.uploadedAt))}
+                                  </p>
+                                  {proof.note && <p className="mt-2 text-xs leading-5 text-slate-300">{proof.note}</p>}
+                                </div>
+                                <a href={`/field/deliveries/proof/${proof.id}`} target="_blank" rel="noreferrer" className="rounded-2xl border border-cyan-300/30 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-300 hover:text-slate-950">
+                                  View Proof
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {["PARTIALLY_DELIVERED", "DELIVERED", "INVOICE_UPLOADED"].includes(order.status) && (
+                        <form action={uploadSignedInvoiceProofAction} className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+                          <input type="hidden" name="orderId" value={order.id} />
+
+                          <label className="block">
+                            <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Proof File</span>
+                            <input name="signedInvoice" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-2 block w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-xl file:border-0 file:bg-cyan-300 file:px-3 file:py-2 file:text-xs file:font-bold file:text-slate-950" required />
+                          </label>
+
+                          <label className="block">
+                            <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Note</span>
+                            <input name="note" placeholder="Signed by dealer / receiver" className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300" />
+                          </label>
+
+                          <button type="submit" className="h-12 rounded-2xl bg-cyan-300 px-5 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+                            Upload Proof
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+
                   <OrderStatusTimeline history={order.statusHistory} />
 
                   <div className="mt-5 flex flex-wrap gap-3">
@@ -493,9 +657,15 @@ export default async function FieldDeliveriesPage({
                       </form>
                     )}
 
-                    {order.status === "DELIVERED" && (
+                    {["DELIVERED", "INVOICE_UPLOADED"].includes(order.status) && (
                       <div className="rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-5 py-3 text-sm font-semibold text-emerald-300">
                         Delivery completed successfully.
+                      </div>
+                    )}
+
+                    {order.status === "PARTIALLY_DELIVERED" && (
+                      <div className="rounded-2xl border border-teal-300/20 bg-teal-300/10 px-5 py-3 text-sm font-semibold text-teal-300">
+                        Partial delivery completed. Upload signed duplicate invoice proof for delivered quantity.
                       </div>
                     )}
                   </div>
