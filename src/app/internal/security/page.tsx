@@ -27,6 +27,10 @@ const eventFilterOptions = [
   { value: "PASSWORD_RESET", label: "Password Reset" },
   { value: "PASSWORD_CHANGED", label: "Password Changed" },
   { value: "FIRST_OWNER_CREATED", label: "First Owner Created" },
+  { value: "OFFICE_LOCATION_UPDATED", label: "Office Location Updated" },
+  { value: "ATTENDANCE_PUNCH", label: "Attendance Punch" },
+  { value: "ATTENDANCE_BREAK", label: "Attendance Break" },
+  { value: "ATTENDANCE_BLOCKED", label: "Attendance Blocked" },
 ];
 
 function parseSqliteUtcDate(value: Date | string) {
@@ -56,13 +60,18 @@ function getEventLabel(eventType: string) {
   if (eventType === "PASSWORD_RESET") return "Password Reset";
   if (eventType === "PASSWORD_CHANGED") return "Password Changed";
   if (eventType === "FIRST_OWNER_CREATED") return "First Owner Created";
+  if (eventType === "OFFICE_LOCATION_UPDATED") return "Office Location Updated";
+  if (eventType === "ATTENDANCE_PUNCH") return "Attendance Punch";
+  if (eventType === "ATTENDANCE_BREAK") return "Attendance Break";
+  if (eventType === "ATTENDANCE_BLOCKED") return "Attendance Blocked";
   return eventType;
 }
 
 function getEventClass(eventType: string) {
-  if (eventType === "LOGIN_SUCCESS" || eventType === "FIRST_OWNER_CREATED") return "bg-emerald-300/10 text-emerald-300";
-  if (eventType === "LOGIN_FAILED" || eventType === "ACCESS_DENIED") return "bg-red-300/10 text-red-300";
-  if (eventType === "PASSWORD_RESET" || eventType === "PASSWORD_CHANGED") return "bg-yellow-300/10 text-yellow-300";
+  if (eventType === "LOGIN_SUCCESS" || eventType === "FIRST_OWNER_CREATED" || eventType === "ATTENDANCE_PUNCH") return "bg-emerald-300/10 text-emerald-300";
+  if (eventType === "ATTENDANCE_BREAK") return "bg-yellow-300/10 text-yellow-300";
+  if (eventType === "LOGIN_FAILED" || eventType === "ACCESS_DENIED" || eventType === "ATTENDANCE_BLOCKED") return "bg-red-300/10 text-red-300";
+  if (eventType === "PASSWORD_RESET" || eventType === "PASSWORD_CHANGED" || eventType === "OFFICE_LOCATION_UPDATED") return "bg-yellow-300/10 text-yellow-300";
   return "bg-cyan-300/10 text-cyan-300";
 }
 

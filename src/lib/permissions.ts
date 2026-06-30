@@ -20,6 +20,9 @@ export type Permission =
   | "manage_qc"
   | "view_reports"
   | "view_security_logs"
+  | "use_office_attendance"
+  | "manage_attendance"
+  | "manage_attendance_settings"
   | "manage_dealer_orders"
   | "view_dealer_products"
   | "place_dealer_order"
@@ -65,6 +68,9 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "manage_qc",
     "view_reports",
     "view_security_logs",
+    "use_office_attendance",
+    "manage_attendance",
+    "manage_attendance_settings",
     "manage_dealer_orders",
     "view_dealer_products",
     "place_dealer_order",
@@ -82,44 +88,53 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "manage_dispatch",
     "manage_qc",
     "view_reports",
+    "use_office_attendance",
+    "manage_attendance",
     "manage_dealer_orders",
   ],
 
   accountant: [
     "view_internal_dashboard",
     "view_reports",
+    "use_office_attendance",
     "manage_collections",
   ],
 
   inventory_team: [
     "view_internal_dashboard",
+    "use_office_attendance",
     "manage_inventory",
     "manage_dispatch",
   ],
 
   dispatch_team: [
     "view_internal_dashboard",
+    "use_office_attendance",
     "manage_dispatch",
     "manage_dealer_orders",
   ],
 
   qc_team: [
     "view_internal_dashboard",
+    "use_office_attendance",
     "manage_qc",
   ],
 
   driver_transport: [
+    "use_office_attendance",
     "view_assigned_deliveries",
     "update_delivery_status",
     "upload_delivery_proof",
   ],
 
   collection_team: [
+    "use_office_attendance",
     "manage_collections",
     "upload_delivery_proof",
   ],
 
   sales_field_team: [
+    "use_office_attendance",
     "manage_field_visits",
   ],
 

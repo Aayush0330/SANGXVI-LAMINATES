@@ -9,7 +9,11 @@ export type SecurityAuditEventType =
   | "ACCESS_DENIED"
   | "PASSWORD_RESET"
   | "PASSWORD_CHANGED"
-  | "FIRST_OWNER_CREATED";
+  | "FIRST_OWNER_CREATED"
+  | "OFFICE_LOCATION_UPDATED"
+  | "ATTENDANCE_PUNCH"
+  | "ATTENDANCE_BREAK"
+  | "ATTENDANCE_BLOCKED";
 
 type AuditUser = {
   id?: string | null;

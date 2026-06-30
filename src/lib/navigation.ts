@@ -13,6 +13,21 @@ export const internalNavigation: NavigationItem[] = [
     permission: "view_internal_dashboard",
   },
   {
+    label: "My Attendance",
+    href: "/account/attendance",
+    permission: "use_office_attendance",
+  },
+  {
+    label: "Attendance",
+    href: "/internal/attendance",
+    permission: "manage_attendance",
+  },
+  {
+    label: "Office Setup",
+    href: "/internal/attendance/settings",
+    permission: "manage_attendance_settings",
+  },
+  {
     label: "Inventory",
     href: "/internal/inventory",
     permission: "manage_inventory",
@@ -68,6 +83,11 @@ export const dealerNavigation: NavigationItem[] = [
 ];
 
 export const fieldNavigation: NavigationItem[] = [
+  {
+    label: "Attendance",
+    href: "/account/attendance",
+    permission: "use_office_attendance",
+  },
   {
     label: "Dashboard",
     href: "/field/dashboard",

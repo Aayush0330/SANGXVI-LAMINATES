@@ -57,6 +57,10 @@ enum SecurityEventType {
   PASSWORD_RESET
   PASSWORD_CHANGED
   FIRST_OWNER_CREATED
+  OFFICE_LOCATION_UPDATED
+  ATTENDANCE_PUNCH
+  ATTENDANCE_BREAK
+  ATTENDANCE_BLOCKED
 }
 
 model User {
@@ -71,10 +75,13 @@ model User {
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
 
-  dealerOrders         Order[]            @relation("DealerOrders")
-  assignedDriverOrders Order[]            @relation("AssignedDriverOrders")
-  authSessions         AuthSession[]
-  securityAuditLogs    SecurityAuditLog[] @relation("SecurityAuditLogs")
+  dealerOrders             Order[]                   @relation("DealerOrders")
+  assignedDriverOrders     Order[]                   @relation("AssignedDriverOrders")
+  authSessions             AuthSession[]
+  securityAuditLogs        SecurityAuditLog[]        @relation("SecurityAuditLogs")
+  officeAttendanceRecords  OfficeAttendance[]        @relation("OfficeAttendanceUser")
+  officeAttendanceEvents   OfficeAttendanceEvent[]   @relation("OfficeAttendanceEventUser")
+  officeAttendanceAttempts OfficeAttendanceAttempt[] @relation("OfficeAttendanceAttemptUser")
 }
 
 model AuthSession {
@@ -181,4 +188,100 @@ model OrderStatusHistory {
 
   @@index([orderId])
   @@index([createdAt])
+}
+
+model OfficeLocation {
+  id            String   @id @default(cuid())
+  name          String   @default("Main Office")
+  address       String?
+  latitude      Float?
+  longitude     Float?
+  radiusMeters  Int      @default(200)
+  isActive      Boolean  @default(true)
+  updatedById   String?
+  updatedByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model OfficeAttendance {
+  id                     String    @id @default(cuid())
+  userId                 String
+  workDate               String
+  status                 String    @default("PUNCHED_IN")
+  punchInAt              DateTime?
+  punchInLatitude        Float?
+  punchInLongitude       Float?
+  punchInAccuracyMeters  Float?
+  punchInDistanceMeters  Float?
+  punchInInsideGeofence  Boolean   @default(false)
+  punchInPhotoDataUrl    String?
+  punchOutAt             DateTime?
+  punchOutLatitude       Float?
+  punchOutLongitude      Float?
+  punchOutAccuracyMeters Float?
+  punchOutDistanceMeters Float?
+  punchOutInsideGeofence Boolean   @default(false)
+  punchOutPhotoDataUrl   String?
+  currentBreakType       String?
+  currentBreakStartedAt  DateTime?
+  breakMinutes           Int       @default(0)
+  totalMinutes           Int?
+  netWorkingMinutes      Int?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  user   User                    @relation("OfficeAttendanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  events OfficeAttendanceEvent[] @relation("OfficeAttendanceEvents")
+
+  @@unique([userId, workDate])
+  @@index([workDate])
+  @@index([userId])
+  @@index([status])
+}
+
+model OfficeAttendanceEvent {
+  id             String   @id @default(cuid())
+  attendanceId   String
+  userId         String
+  eventType      String
+  label          String
+  latitude       Float?
+  longitude      Float?
+  accuracyMeters Float?
+  distanceMeters Float?
+  insideGeofence Boolean  @default(false)
+  photoDataUrl   String?
+  note           String?
+  createdAt      DateTime @default(now())
+
+  attendance OfficeAttendance @relation("OfficeAttendanceEvents", fields: [attendanceId], references: [id], onDelete: Cascade)
+  user       User             @relation("OfficeAttendanceEventUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([attendanceId])
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model OfficeAttendanceAttempt {
+  id             String   @id @default(cuid())
+  userId         String
+  actionType     String
+  status         String
+  message        String?
+  latitude       Float?
+  longitude      Float?
+  accuracyMeters Float?
+  distanceMeters Float?
+  insideGeofence Boolean  @default(false)
+  photoDataUrl   String?
+  attemptedAt    DateTime @default(now())
+
+  user User @relation("OfficeAttendanceAttemptUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([actionType])
+  @@index([status])
+  @@index([attemptedAt])
 }
