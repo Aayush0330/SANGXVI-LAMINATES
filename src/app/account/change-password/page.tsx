@@ -13,8 +13,9 @@ const prismaRoleToAppRole: Record<
   OWNER: "owner",
   MANAGER: "manager",
   ACCOUNTANT: "accountant",
-  INVENTORY_TEAM: "inventory_team",
+
   DISPATCH_TEAM: "dispatch_team",
+  ORDER_TEAM: "order_team",
   QC_TEAM: "qc_team",
   DRIVER_TRANSPORT: "driver_transport",
   COLLECTION_TEAM: "collection_team",
@@ -47,7 +48,7 @@ function getMessage(error?: string, reason?: string) {
   if (error === "weak-password") {
     return {
       type: "error",
-      text: "New password must be at least 8 characters.",
+      text: "Use at least 12 characters with uppercase, lowercase, number and symbol.",
     };
   }
 
@@ -95,20 +96,20 @@ export default async function ChangePasswordPage({
   const canSkip = !mustChangePassword;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-10 text-white">
-      <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/[0.04] p-8 shadow-2xl shadow-black/30">
-        <p className="mb-2 text-sm font-semibold uppercase tracking-[0.25em] text-cyan-300">
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6 py-10 text-slate-950">
+      <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm shadow-slate-200/70">
+        <p className="mb-2 text-sm font-semibold uppercase tracking-[0.25em] text-blue-600">
           Account Security
         </p>
 
         <h1 className="text-3xl font-bold">Change Password</h1>
 
-        <p className="mt-3 text-sm leading-6 text-slate-300">
+        <p className="mt-3 text-sm leading-6 text-slate-600">
           Update your password to keep your ERP account secure.
         </p>
 
-        <div className="mt-6 rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-          <p className="text-sm font-bold text-white">{session.user.name}</p>
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-bold text-slate-950">{session.user.name}</p>
           <p className="mt-1 text-xs text-slate-500">{session.user.email}</p>
         </div>
 
@@ -116,8 +117,8 @@ export default async function ChangePasswordPage({
           <div
             className={`mt-6 rounded-2xl border px-4 py-3 text-sm font-semibold ${
               message.type === "warning"
-                ? "border-yellow-300/20 bg-yellow-300/10 text-yellow-200"
-                : "border-red-300/20 bg-red-300/10 text-red-300"
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-red-200 bg-red-50 text-red-700"
             }`}
           >
             {message.text}
@@ -135,7 +136,7 @@ export default async function ChangePasswordPage({
           <PasswordInput
             name="newPassword"
             label="New Password"
-            placeholder="Minimum 8 characters"
+            placeholder="12+ characters with number and symbol"
             autoComplete="new-password"
           />
 
@@ -148,7 +149,7 @@ export default async function ChangePasswordPage({
 
           <button
             type="submit"
-            className="h-14 w-full rounded-2xl bg-cyan-300 px-4 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
+            className="h-14 w-full rounded-2xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
           >
             Update Password
           </button>
@@ -157,14 +158,14 @@ export default async function ChangePasswordPage({
         {canSkip && (
           <a
             href={getPortalLandingPath(prismaRoleToAppRole[session.user.role])}
-            className="mt-4 inline-flex h-12 w-full items-center justify-center rounded-2xl border border-white/10 text-sm font-bold text-slate-300 transition hover:bg-white/[0.04]"
+            className="mt-4 inline-flex h-12 w-full items-center justify-center rounded-2xl border border-slate-200 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
           >
             Back to Dashboard
           </a>
         )}
 
-        <div className="mt-6 rounded-2xl border border-white/10 bg-slate-900/70 p-4 text-xs leading-5 text-slate-400">
-          <p className="font-bold text-slate-200">Password tip</p>
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-500">
+          <p className="font-bold text-slate-700">Password tip</p>
           <p className="mt-1">
             Use a unique password that is not used on any other website.
           </p>

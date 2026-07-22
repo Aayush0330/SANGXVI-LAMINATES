@@ -4,7 +4,7 @@ import { createSecurityAuditLog } from "./security-audit";
 
 export async function checkPermission(permission: Permission, path?: string) {
   const currentUser = await getCurrentUser();
-  const hasAccess = hasPermission(currentUser.role, permission);
+  const hasAccess = hasPermission(currentUser.roles, permission);
 
   if (!hasAccess) {
     await createSecurityAuditLog({

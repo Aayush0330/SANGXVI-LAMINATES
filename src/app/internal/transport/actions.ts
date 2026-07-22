@@ -59,7 +59,7 @@ export async function createTransportOptionAction(formData: FormData) {
 
   const existing = await prisma.$queryRaw<TransportOptionRow[]>`
     SELECT "id", "name", "isActive"
-    FROM "TransportOption"
+    FROM public."TransportOption"
     WHERE lower("name") = lower(${name})
     LIMIT 1
   `;
@@ -71,7 +71,7 @@ export async function createTransportOptionAction(formData: FormData) {
   const id = randomUUID();
 
   await prisma.$executeRaw`
-    INSERT INTO "TransportOption" (
+    INSERT INTO public."TransportOption" (
       "id",
       "name",
       "description",
@@ -107,7 +107,7 @@ export async function createTransportOptionAction(formData: FormData) {
   });
 
   revalidatePath("/internal/transport");
-  revalidatePath("/internal/dispatch");
+  revalidatePath("/internal/qc");
 
   redirect("/internal/transport?success=created");
 }
@@ -132,7 +132,7 @@ export async function updateTransportOptionAction(formData: FormData) {
 
   const duplicate = await prisma.$queryRaw<TransportOptionRow[]>`
     SELECT "id", "name", "isActive"
-    FROM "TransportOption"
+    FROM public."TransportOption"
     WHERE lower("name") = lower(${name}) AND "id" <> ${id}
     LIMIT 1
   `;
@@ -142,7 +142,7 @@ export async function updateTransportOptionAction(formData: FormData) {
   }
 
   const updated = await prisma.$executeRaw`
-    UPDATE "TransportOption"
+    UPDATE public."TransportOption"
     SET
       "name" = ${name},
       "description" = ${description || null},
@@ -165,7 +165,7 @@ export async function updateTransportOptionAction(formData: FormData) {
   });
 
   revalidatePath("/internal/transport");
-  revalidatePath("/internal/dispatch");
+  revalidatePath("/internal/qc");
 
   redirect("/internal/transport?success=updated");
 }
@@ -182,7 +182,7 @@ export async function toggleTransportOptionAction(formData: FormData) {
 
   const existing = await prisma.$queryRaw<TransportOptionRow[]>`
     SELECT "id", "name", "isActive"
-    FROM "TransportOption"
+    FROM public."TransportOption"
     WHERE "id" = ${id}
     LIMIT 1
   `;
@@ -192,7 +192,7 @@ export async function toggleTransportOptionAction(formData: FormData) {
   }
 
   await prisma.$executeRaw`
-    UPDATE "TransportOption"
+    UPDATE public."TransportOption"
     SET
       "isActive" = ${nextActive},
       "updatedById" = ${currentUser.id},
@@ -213,7 +213,7 @@ export async function toggleTransportOptionAction(formData: FormData) {
   });
 
   revalidatePath("/internal/transport");
-  revalidatePath("/internal/dispatch");
+  revalidatePath("/internal/qc");
 
   redirect(`/internal/transport?success=${nextActive ? "enabled" : "disabled"}`);
 }

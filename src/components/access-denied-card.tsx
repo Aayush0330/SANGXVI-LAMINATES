@@ -20,17 +20,17 @@ export function AccessDeniedCard({
   return (
     <div
       className={`flex min-h-[70vh] items-center justify-center px-6 ${
-        isDark ? "text-white" : "text-slate-950"
+        isDark ? "text-slate-950" : "text-slate-950"
       }`}
     >
       <div
-        className={`max-w-lg rounded-3xl p-8 text-center ${
+        className={`max-w-lg rounded-2xl p-8 text-center ${
           isDark
-            ? "border border-white/10 bg-white/[0.04]"
+            ? "border border-slate-200 bg-white"
             : "bg-white shadow-sm"
         }`}
       >
-        <p className="text-sm font-semibold uppercase tracking-[0.25em] text-red-400">
+        <p className="text-sm font-semibold uppercase tracking-[0.25em] text-red-700">
           Access Restricted
         </p>
 
@@ -38,7 +38,7 @@ export function AccessDeniedCard({
 
         <p
           className={`mt-4 text-sm leading-6 ${
-            isDark ? "text-slate-400" : "text-slate-600"
+            isDark ? "text-slate-500" : "text-slate-600"
           }`}
         >
           {description}
@@ -48,8 +48,8 @@ export function AccessDeniedCard({
           href={backHref}
           className={`mt-6 inline-flex rounded-full px-5 py-3 text-sm font-bold ${
             isDark
-              ? "bg-cyan-300 text-slate-950"
-              : "bg-slate-950 text-white"
+              ? "bg-blue-600 text-white"
+              : "bg-slate-50 text-slate-950"
           }`}
         >
           {backLabel}

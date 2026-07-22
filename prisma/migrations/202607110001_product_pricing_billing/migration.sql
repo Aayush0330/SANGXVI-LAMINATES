@@ -1,0 +1,33 @@
+ALTER TABLE "Product"
+ADD COLUMN IF NOT EXISTS "costPrice" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "sellingPrice" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "dealerPrice" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "gstPercent" INTEGER NOT NULL DEFAULT 18;
+
+ALTER TABLE "OrderItem"
+ADD COLUMN IF NOT EXISTS "unitPrice" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "gstPercent" INTEGER NOT NULL DEFAULT 18,
+ADD COLUMN IF NOT EXISTS "subtotalAmount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "taxAmount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "totalAmount" INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE "Order"
+ADD COLUMN IF NOT EXISTS "subtotalAmount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "taxAmount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "discountAmount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "freightAmount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "balanceAmount" INTEGER NOT NULL DEFAULT 0;
+
+UPDATE "Product"
+SET
+  "sellingPrice" = CASE WHEN "sellingPrice" <= 0 THEN 1000 ELSE "sellingPrice" END,
+  "dealerPrice" = CASE WHEN "dealerPrice" <= 0 THEN 1000 ELSE "dealerPrice" END,
+  "gstPercent" = CASE WHEN "gstPercent" <= 0 THEN 18 ELSE "gstPercent" END;
+
+UPDATE "Order"
+SET
+  "subtotalAmount" = CASE WHEN "subtotalAmount" = 0 THEN "orderAmount" ELSE "subtotalAmount" END,
+  "taxAmount" = CASE WHEN "taxAmount" IS NULL THEN 0 ELSE "taxAmount" END,
+  "discountAmount" = CASE WHEN "discountAmount" IS NULL THEN 0 ELSE "discountAmount" END,
+  "freightAmount" = CASE WHEN "freightAmount" IS NULL THEN 0 ELSE "freightAmount" END,
+  "balanceAmount" = GREATEST("orderAmount" - "amountReceived", 0);

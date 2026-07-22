@@ -54,5 +54,12 @@ export function verifyPassword(password: string, storedHash?: string | null) {
 }
 
 export function isStrongEnoughPassword(password: string) {
-  return password.trim().length >= 8;
+  const value = password.trim();
+  return (
+    value.length >= 12 &&
+    /[a-z]/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /\d/.test(value) &&
+    /[^A-Za-z0-9]/.test(value)
+  );
 }

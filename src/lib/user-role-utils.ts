@@ -1,0 +1,4 @@
+import type {UserRole as PrismaUserRole} from "@/generated/prisma/client";import type {UserRole} from "./permissions";
+export const prismaRoleToAppRole:Record<PrismaUserRole,UserRole>={OWNER:"owner",MANAGER:"manager",ACCOUNTANT:"accountant",DISPATCH_TEAM:"dispatch_team",ORDER_TEAM:"order_team",QC_TEAM:"qc_team",DRIVER_TRANSPORT:"driver_transport",COLLECTION_TEAM:"collection_team",SALES_FIELD_TEAM:"sales_field_team",DEALER:"dealer"};
+export function getPrismaRolesFromUser(user:{role:PrismaUserRole;roleAssignments?:Array<{role:PrismaUserRole}>|null}){return [...new Set([user.role,...(user.roleAssignments?.map(x=>x.role)??[])])];}
+export function getAppRolesFromUser(user:{role:PrismaUserRole;roleAssignments?:Array<{role:PrismaUserRole}>|null}){return getPrismaRolesFromUser(user).map(role=>prismaRoleToAppRole[role]);}

@@ -47,7 +47,7 @@ export async function saveOfficeLocationAction(formData: FormData) {
 
   const existingRows = await prisma.$queryRaw<{ id: string }[]>`
     SELECT "id"
-    FROM "OfficeLocation"
+    FROM public."OfficeLocation"
     WHERE "isActive" = true
     ORDER BY "updatedAt" DESC
     LIMIT 1
@@ -57,7 +57,7 @@ export async function saveOfficeLocationAction(formData: FormData) {
 
   if (existing) {
     await prisma.$executeRaw`
-      UPDATE "OfficeLocation"
+      UPDATE public."OfficeLocation"
       SET
         "name" = ${name},
         "address" = ${address},
@@ -72,7 +72,7 @@ export async function saveOfficeLocationAction(formData: FormData) {
     `;
   } else {
     await prisma.$executeRaw`
-      INSERT INTO "OfficeLocation" (
+      INSERT INTO public."OfficeLocation" (
         "id",
         "name",
         "address",

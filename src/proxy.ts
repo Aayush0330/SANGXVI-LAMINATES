@@ -7,6 +7,23 @@ import {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  const isProtectedPath =
+    pathname === "/internal" ||
+    pathname.startsWith("/internal/") ||
+    pathname === "/dealer" ||
+    pathname.startsWith("/dealer/") ||
+    pathname === "/field" ||
+    pathname.startsWith("/field/") ||
+    pathname === "/account" ||
+    pathname.startsWith("/account/");
+
+  // Extra safety: public routes must never enter the authentication redirect.
+  // Server Actions perform their own authorization and must keep Next.js's
+  // special POST response format intact.
+  if (!isProtectedPath || request.headers.has("next-action")) {
+    return NextResponse.next();
+  }
+
   if (!request.cookies.has(SESSION_COOKIE_NAME)) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("error", "session-required");
@@ -30,9 +47,21 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/internal/:path*",
-    "/dealer/:path*",
-    "/field/:path*",
-    "/account/:path*",
+    {
+      source: "/internal/:path*",
+      missing: [{ type: "header", key: "next-action" }],
+    },
+    {
+      source: "/dealer/:path*",
+      missing: [{ type: "header", key: "next-action" }],
+    },
+    {
+      source: "/field/:path*",
+      missing: [{ type: "header", key: "next-action" }],
+    },
+    {
+      source: "/account/:path*",
+      missing: [{ type: "header", key: "next-action" }],
+    },
   ],
 };

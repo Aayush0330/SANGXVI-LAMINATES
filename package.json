@@ -1,5 +1,5 @@
 {
-  "name": "sangxvi-erp",
+  "name": "sanghvi-erp",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,16 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "db:backup": "tsx scripts/backup-db.ts",
+    "db:restore": "tsx scripts/restore-db.ts",
+    "db:backup:auto": "tsx scripts/backup-db.ts --automatic",
+    "db:backup:verify": "tsx scripts/verify-backup.ts",
+    "db:migrations:fresh-test": "tsx scripts/verify-fresh-migrations.ts",
+    "security:rotate-launch-passwords": "tsx scripts/rotate-launch-passwords.ts",
+    "reports:daily": "tsx scripts/generate-daily-report.ts",
+    "alerts:escalate": "tsx scripts/escalate-alerts.ts",
+    "reorder:alerts": "tsx scripts/sync-reorder-alerts.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

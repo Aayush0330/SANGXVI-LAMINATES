@@ -68,10 +68,10 @@ function getButtonClass(tone?: AttendanceActionOption["tone"]) {
   }
 
   if (tone === "warning") {
-    return "bg-yellow-300 text-slate-950 hover:bg-yellow-200";
+    return "bg-amber-500 text-slate-950 hover:bg-amber-600";
   }
 
-  return "bg-cyan-300 text-slate-950 hover:bg-cyan-200";
+  return "bg-blue-600 text-white hover:bg-blue-700";
 }
 
 export function OfficeAttendanceCapture({
@@ -188,37 +188,37 @@ export function OfficeAttendanceCapture({
   }
 
   return (
-    <div className="rounded-3xl border border-cyan-300/20 bg-cyan-300/[0.04] p-4 sm:p-6">
+    <div className="rounded-2xl border border-blue-100 bg-blue-600/[0.04] p-4 sm:p-6">
       {hasPhotoAction ? (
         <>
-          <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
             <video
               ref={videoRef}
               playsInline
               muted
-              className="aspect-video w-full bg-slate-950 object-cover"
+              className="aspect-video w-full bg-slate-50 object-cover"
             />
           </div>
 
           <canvas ref={canvasRef} className="hidden" />
         </>
       ) : (
-        <div className="rounded-3xl border border-white/10 bg-slate-950 p-5">
-          <p className="text-sm font-bold text-white">Photo already captured at Punch In</p>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+          <p className="text-sm font-bold text-slate-950">Photo already captured at Punch In</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
             Breaks and logout do not need another photo. Click the correct action and the system will save server time, GPS location, and office geofence verification.
           </p>
         </div>
       )}
 
       {message ? (
-        <p className="mt-4 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm leading-6 text-slate-300">
+        <p className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-600">
           {message}
         </p>
       ) : null}
 
       {helperText ? (
-        <p className="mt-4 rounded-2xl border border-yellow-300/20 bg-yellow-300/10 px-4 py-3 text-sm leading-6 text-yellow-100">
+        <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
           {helperText}
         </p>
       ) : null}
@@ -229,7 +229,7 @@ export function OfficeAttendanceCapture({
             type="button"
             onClick={startCamera}
             disabled={disabled || isPending}
-            className="h-12 rounded-2xl border border-white/10 px-4 text-sm font-bold text-slate-200 transition hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-12 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {cameraReady ? "Restart Camera" : "Start Live Camera"}
           </button>
@@ -258,7 +258,7 @@ export function OfficeAttendanceCapture({
       </div>
 
       {actions.length === 0 ? (
-        <p className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-3 text-sm leading-6 text-emerald-100">
+        <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
           Attendance is completed for today.
         </p>
       ) : null}

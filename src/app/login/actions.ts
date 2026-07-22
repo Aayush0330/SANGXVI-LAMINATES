@@ -21,8 +21,9 @@ const prismaRoleToAppRole: Record<
   OWNER: "owner",
   MANAGER: "manager",
   ACCOUNTANT: "accountant",
-  INVENTORY_TEAM: "inventory_team",
+
   DISPATCH_TEAM: "dispatch_team",
+  ORDER_TEAM: "order_team",
   QC_TEAM: "qc_team",
   DRIVER_TRANSPORT: "driver_transport",
   COLLECTION_TEAM: "collection_team",

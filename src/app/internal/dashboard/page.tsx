@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
+import { AccountantFinanceDashboard } from "@/components/accountant-finance-dashboard";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
+import { getPortalLandingLabel, getPortalLandingPath } from "@/lib/current-user";
 import { getOrderDisplayName } from "@/lib/order-fulfillment";
 import { getOrdersWithRelations, getOrderStatusRows } from "@/lib/order-queries";
 import { roleLabels } from "@/lib/permissions";
@@ -16,18 +18,18 @@ function getOrderStatusLabel(status: string) {
 
 function getStatusClass(status: string) {
   if (status === "DELIVERED") {
-    return "bg-emerald-300/10 text-emerald-300 ring-1 ring-emerald-300/20";
+    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-300/20";
   }
 
   if (status === "CANCELLED") {
-    return "bg-red-300/10 text-red-300 ring-1 ring-red-300/20";
+    return "bg-red-50 text-red-700 ring-1 ring-red-300/20";
   }
 
   if (status === "LOW_STOCK" || status === "OUT_OF_STOCK") {
-    return "bg-yellow-300/10 text-yellow-300 ring-1 ring-yellow-300/20";
+    return "bg-amber-50 text-yellow-300 ring-1 ring-yellow-300/20";
   }
 
-  return "bg-cyan-300/10 text-cyan-300 ring-1 ring-cyan-300/20";
+  return "bg-blue-50 text-blue-600 ring-1 ring-blue-100";
 }
 
 function StatIcon({ type }: { type: "box" | "stock" | "blocked" | "alert" | "order" | "dealer" }) {
@@ -100,14 +102,25 @@ export default async function InternalDashboardPage() {
       <AccessDeniedCard
         title="Dashboard Access Denied"
         description="Your current role does not have permission to access the Internal ERP dashboard."
-        backHref="/login"
-        backLabel="Switch User"
+        backHref={getPortalLandingPath(currentUser.role)}
+        backLabel={getPortalLandingLabel(currentUser.role)}
       />
     );
   }
 
-  const [products, orders, activeDealers] = await Promise.all([
+  const isAccountantFocused =
+    currentUser.roles.includes("accountant") &&
+    !currentUser.roles.some((role) =>
+      ["owner", "manager", "dispatch_team", "order_team", "qc_team"].includes(role),
+    );
+
+  if (isAccountantFocused) {
+    return <AccountantFinanceDashboard currentUser={currentUser} />;
+  }
+
+  const [products, orders, activeDealers, missedSalesRows] = await Promise.all([
     prisma.product.findMany({
+      where: { isActive: true },
       orderBy: {
         createdAt: "asc",
       },
@@ -119,19 +132,16 @@ export default async function InternalDashboardPage() {
         status: "ACTIVE",
       },
     }),
+    prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) AS "count"
+      FROM public."InventoryInquiry"
+      WHERE "status" = 'MISSED_SALE'
+    `,
   ]);
 
   const allOrders = await getOrderStatusRows();
 
   const totalProducts = products.length;
-  const availableStock = products.reduce(
-    (total, product) => total + product.quantity,
-    0
-  );
-  const blockedStock = products.reduce(
-    (total, product) => total + product.blocked,
-    0
-  );
   const lowStockItems = products.filter(
     (product) =>
       product.status === "LOW_STOCK" ||
@@ -140,63 +150,13 @@ export default async function InternalDashboardPage() {
   ).length;
 
   const totalOrders = allOrders.length;
+  const missedSales = Number(missedSalesRows[0]?.count ?? 0);
   const deliveredOrders = allOrders.filter(
     (order) => order.status === "DELIVERED"
   ).length;
   const pendingOrders = allOrders.filter(
     (order) => order.status !== "DELIVERED" && order.status !== "CANCELLED"
   ).length;
-
-  const dashboardStats = [
-    {
-      label: "Total Products",
-      value: totalProducts.toLocaleString("en-IN"),
-      helper: "Inventory items",
-      icon: "box" as const,
-    },
-    {
-      label: "Available Stock",
-      value: availableStock.toLocaleString("en-IN"),
-      helper: "Ready quantity",
-      icon: "stock" as const,
-    },
-    {
-      label: "Blocked Stock",
-      value: blockedStock.toLocaleString("en-IN"),
-      helper: "Reserved orders",
-      icon: "blocked" as const,
-    },
-    {
-      label: "Low Stock Items",
-      value: String(lowStockItems).padStart(2, "0"),
-      helper: "Needs attention",
-      icon: "alert" as const,
-    },
-    {
-      label: "Total Orders",
-      value: totalOrders.toLocaleString("en-IN"),
-      helper: "All dealer orders",
-      icon: "order" as const,
-    },
-    {
-      label: "Pending Orders",
-      value: pendingOrders.toLocaleString("en-IN"),
-      helper: "In workflow",
-      icon: "order" as const,
-    },
-    {
-      label: "Delivered",
-      value: deliveredOrders.toLocaleString("en-IN"),
-      helper: "Completed",
-      icon: "stock" as const,
-    },
-    {
-      label: "Active Dealers",
-      value: activeDealers.toLocaleString("en-IN"),
-      helper: "Dealer accounts",
-      icon: "dealer" as const,
-    },
-  ];
 
   const stockAlerts = products
     .filter(
@@ -207,136 +167,332 @@ export default async function InternalDashboardPage() {
     )
     .slice(0, 5);
 
+  const heroStats = [
+    {
+      label: "Products",
+      value: totalProducts.toLocaleString("en-IN"),
+      helper: `${lowStockItems} low-stock checks today`,
+      icon: "box" as const,
+      accent: "blue",
+    },
+    {
+      label: "Orders",
+      value: totalOrders.toLocaleString("en-IN"),
+      helper: `${pendingOrders} pending workflow`,
+      icon: "order" as const,
+      accent: "cyan",
+    },
+    {
+      label: "Dealers",
+      value: activeDealers.toLocaleString("en-IN"),
+      helper: "Active dealer accounts",
+      icon: "dealer" as const,
+      accent: "emerald",
+    },
+    {
+      label: "Missed Sales",
+      value: missedSales.toLocaleString("en-IN"),
+      helper: "High priority follow-ups",
+      icon: "alert" as const,
+      accent: "orange",
+    },
+  ];
+
+  const workflowOrders = orders.slice(0, 3);
+  const liveActivities = [
+    {
+      title: deliveredOrders > 0 ? "Dispatch movement" : "Workflow ready",
+      body: `${deliveredOrders.toLocaleString("en-IN")} delivered orders tracked`,
+      tone: "emerald",
+    },
+    {
+      title: "Stock alert",
+      body: `${lowStockItems.toLocaleString("en-IN")} products need inventory attention`,
+      tone: "orange",
+    },
+    {
+      title: "Dealer activity",
+      body: `${activeDealers.toLocaleString("en-IN")} active dealer accounts`,
+      tone: "cyan",
+    },
+  ];
+
   return (
-    <div className="space-y-5 sm:space-y-8">
-      <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-6 lg:p-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="relative -m-3 overflow-hidden rounded-[2rem] bg-[#f5f8fc] p-3 text-slate-950 sm:-m-6 sm:p-6 lg:-m-10 lg:p-8 dark:bg-slate-950 dark:text-white">
+      <div className="pointer-events-none absolute -right-24 -top-40 h-[31rem] w-[31rem] rounded-full bg-cyan-200/70 blur-3xl dark:bg-cyan-500/10" />
+      <div className="pointer-events-none absolute bottom-[-12rem] left-72 h-[28rem] w-[28rem] rounded-full bg-blue-200/70 blur-3xl dark:bg-blue-500/10" />
+
+      <div className="relative space-y-5 sm:space-y-6">
+        <section className="flex flex-col gap-4 rounded-[2rem] border border-white/70 bg-white/75 p-5 shadow-sm shadow-slate-200/80 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:p-6 dark:border-white/10 dark:bg-slate-900/70 dark:shadow-none">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-cyan-300 sm:text-sm">
-              Internal Dashboard
+            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-600 sm:text-xs dark:text-cyan-300">
+              Operations Dashboard
             </p>
 
-            <h1 className="mt-2 text-2xl font-bold sm:mt-3 sm:text-4xl lg:text-5xl">
-              {roleLabels[currentUser.role]}
+            <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">
+              Sanghvi ERP
             </h1>
 
-            <p className="mt-3 max-w-2xl text-xs leading-5 text-slate-400 sm:text-sm sm:leading-6">
-              Live overview of inventory, orders, blocked stock, deliveries, and
-              dealer activity.
+            <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
+              Live ERP view for inventory, orders, dispatch and task health.
+              Current role: {roleLabels[currentUser.role]}.
             </p>
           </div>
 
-          <Link
-            href="/internal/inventory"
-            className="inline-flex w-fit rounded-2xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-200 transition hover:bg-cyan-300 hover:text-slate-950 sm:px-5 sm:py-3 sm:text-sm"
-          >
-            Open Inventory
-          </Link>
-        </div>
-      </section>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/internal/inventory"
+              className="inline-flex w-fit rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 sm:px-5 dark:border-white/10 dark:bg-slate-950 dark:text-slate-200"
+            >
+              Open Inventory
+            </Link>
+            <Link
+              href="/internal/inquiries"
+              className="inline-flex w-fit rounded-2xl bg-slate-950 px-4 py-3 text-xs font-black text-white shadow-lg shadow-slate-900/10 transition hover:bg-blue-700 sm:px-5 dark:bg-cyan-300 dark:text-slate-950"
+            >
+              Add Inquiry
+            </Link>
+          </div>
+        </section>
 
-      <section className="grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">
-        {dashboardStats.map((stat) => (
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {heroStats.map((stat) => (
           <div
             key={stat.label}
-            className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/10 sm:rounded-3xl sm:p-6"
+              className="rounded-[1.75rem] border border-white/80 bg-white p-5 shadow-sm shadow-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-200/70 dark:border-white/10 dark:bg-slate-900 dark:shadow-none"
           >
             <div className="flex items-start justify-between gap-3">
-              <p className="text-xs leading-4 text-slate-400 sm:text-sm">
-                {stat.label}
-              </p>
+                <div
+                  className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
+                    stat.accent === "emerald"
+                      ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300"
+                      : stat.accent === "orange"
+                        ? "bg-orange-50 text-orange-600 dark:bg-orange-400/10 dark:text-orange-300"
+                        : stat.accent === "cyan"
+                          ? "bg-cyan-50 text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-300"
+                          : "bg-blue-50 text-blue-600 dark:bg-blue-400/10 dark:text-blue-300"
+                  }`}
+                >
+                  <StatIcon type={stat.icon} />
+                </div>
 
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-cyan-300/10 text-cyan-300 sm:h-10 sm:w-10">
-                <StatIcon type={stat.icon} />
-              </span>
+                <p className="pt-2 text-xs font-black uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  {stat.label}
+                </p>
             </div>
 
-            <h2 className="mt-4 text-2xl font-bold leading-none sm:text-4xl">
+              <h2 className="mt-5 text-3xl font-black leading-none tracking-tight sm:text-4xl">
               {stat.value}
             </h2>
-
-            <p className="mt-3 text-[11px] leading-4 text-slate-500 sm:text-sm">
-              {stat.helper}
-            </p>
+              <p className="mt-3 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                {stat.helper}
+              </p>
           </div>
         ))}
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
-        <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
-          <div className="border-b border-white/10 p-4 sm:p-6">
-            <h2 className="text-lg font-bold sm:text-xl">Recent Orders</h2>
-            <p className="mt-2 text-xs text-slate-400 sm:text-sm">
-              Latest dealer orders and current workflow status.
-            </p>
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_342px]">
+          <div className="space-y-5">
+            <div className="rounded-[2rem] border border-white/80 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-white/10 dark:bg-slate-900 dark:shadow-none">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-black tracking-tight">Today&apos;s Workflow</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                    Latest order movement across receiving, QC and dispatch.
+                  </p>
+                </div>
+
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-300">
+                  {pendingOrders} active
+                </span>
           </div>
 
-          <div className="divide-y divide-white/10">
-            {orders.length === 0 ? (
-              <div className="p-6 text-sm text-slate-400">
-                No orders found yet.
+              <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                {workflowOrders.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm font-semibold text-slate-500 dark:border-white/10 dark:bg-slate-950 dark:text-slate-400 lg:col-span-3">
+                    No active workflow orders found yet.
               </div>
             ) : (
-              orders.map((order) => (
+                  workflowOrders.map((order, index) => (
                 <div
                   key={order.id}
-                  className="flex flex-col gap-3 p-4 transition hover:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between sm:p-5"
+                      className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-slate-950"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-white">
+                      <p
+                        className={`text-xs font-black uppercase tracking-[0.14em] ${
+                          index === 2
+                            ? "text-orange-600 dark:text-orange-300"
+                            : index === 1
+                              ? "text-violet-600 dark:text-violet-300"
+                              : "text-blue-600 dark:text-blue-300"
+                        }`}
+                      >
+                        {index === 0 ? "New Orders" : index === 1 ? "QC Review" : "Dispatch"}
+                      </p>
+
+                      <div className="mt-4 rounded-[1.25rem] border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-slate-900">
+                        <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                          {order.orderNumber}
+                        </p>
+                        <p className="mt-2 line-clamp-2 text-sm font-black text-slate-950 dark:text-white">
                       {getOrderDisplayName(order.items)}
                     </p>
 
-                    <p className="mt-1 truncate text-xs text-slate-500">
-                      {order.orderNumber} · {order.dealer.name}
-                      {order.assignedDriver
-                        ? ` · Driver: ${order.assignedDriver.name}`
-                        : ""}
-                    </p>
-                  </div>
+                        <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                          {order.dealer.name}
+                        </p>
 
-                  <span
-                    className={`w-fit rounded-full px-3 py-1 text-[11px] font-bold sm:text-xs ${getStatusClass(
-                      order.status
-                    )}`}
-                  >
-                    {getOrderStatusLabel(order.status)}
-                  </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[2rem] border border-white/80 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-white/10 dark:bg-slate-900 dark:shadow-none">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-black tracking-tight">
+                    Recent Orders
+                  </h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                    Latest dealer orders and their current workflow status.
+                  </p>
                 </div>
-              ))
-            )}
-          </div>
-        </div>
 
-        <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
-          <div className="border-b border-white/10 p-4 sm:p-6">
-            <h2 className="text-lg font-bold sm:text-xl">Stock Alerts</h2>
-            <p className="mt-2 text-xs text-slate-400 sm:text-sm">
-              Products that need inventory attention.
-            </p>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {orders.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm font-semibold text-slate-500 dark:border-white/10 dark:bg-slate-950 dark:text-slate-400">
+                    No orders found yet.
+                  </div>
+                ) : (
+                  orders.map((order) => (
+                      <div
+                        key={order.id}
+                        className="grid gap-3 rounded-[1.25rem] border border-slate-200 bg-white p-4 transition hover:border-blue-200 hover:bg-blue-50/40 dark:border-white/10 dark:bg-slate-950 dark:hover:border-cyan-400/30 dark:hover:bg-cyan-400/5 md:grid-cols-[minmax(0,1fr)_auto]"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-slate-950 dark:text-white">
+                            {order.orderNumber}
+                          </p>
+                          <p className="mt-1 truncate text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            {getOrderDisplayName(order.items)} · {order.dealer.name}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                          <span className={`w-fit rounded-full px-3 py-1 text-[11px] font-black ${getStatusClass(order.status)}`}>
+                            {getOrderStatusLabel(order.status)}
+                          </span>
+                        </div>
+                  </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
 
-          <div className="divide-y divide-white/10">
-            {stockAlerts.length === 0 ? (
-              <div className="p-6 text-sm text-slate-400">
-                No low stock alerts.
+          <div className="space-y-5">
+            <div className="rounded-[2rem] border border-white/80 bg-white p-5 text-slate-950 shadow-sm shadow-slate-200/70 dark:border-cyan-400/20 dark:bg-slate-950 dark:text-white dark:shadow-2xl dark:shadow-slate-900/10">
+              <h2 className="text-xl font-black tracking-tight text-slate-950 dark:text-white">
+                Inventory Snapshot
+              </h2>
+              <p className="mt-3 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
+                Quick stock health summary. Use the floating AI bot for
+                questions.
+              </p>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Products
+                  </p>
+                  <p className="mt-2 text-3xl font-black text-slate-950 dark:text-white">
+                    {products.length.toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 dark:border-orange-300/20 dark:bg-orange-400/10">
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-700 dark:text-orange-200">
+                    Low Stock
+                  </p>
+                  <p className="mt-2 text-3xl font-black text-orange-800 dark:text-orange-100">
+                    {lowStockItems.toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-4 dark:border-cyan-300/20 dark:bg-cyan-400/10">
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-700 dark:text-cyan-200">
+                    Missed Sales
+                  </p>
+                  <p className="mt-2 text-3xl font-black text-cyan-800 dark:text-cyan-100">
+                    {missedSales.toLocaleString("en-IN")}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] border border-white/80 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-white/10 dark:bg-slate-900 dark:shadow-none">
+              <h2 className="text-xl font-black tracking-tight">
+                Live Activity
+              </h2>
+
+              <div className="mt-5 space-y-5">
+                {liveActivities.map((activity) => (
+                  <div key={activity.title} className="flex gap-3">
+                    <span
+                      className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                        activity.tone === "emerald"
+                          ? "bg-emerald-500"
+                          : activity.tone === "orange"
+                            ? "bg-orange-500"
+                            : activity.tone === "cyan"
+                              ? "bg-cyan-600"
+                              : "bg-blue-600"
+                      }`}
+                    />
+                    <div>
+                      <p className="text-sm font-black text-slate-950 dark:text-white">
+                        {activity.title}
+                      </p>
+                      <p className="mt-1 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-400">
+                        {activity.body}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] border border-white/80 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-white/10 dark:bg-slate-900 dark:shadow-none">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xl font-black tracking-tight">Stock Alerts</h2>
+                <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-700 dark:bg-orange-400/10 dark:text-orange-300">
+                  {stockAlerts.length}
+                </span>
+          </div>
+
+              <div className="mt-4 space-y-3">
+                {stockAlerts.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm font-semibold text-slate-500 dark:border-white/10 dark:text-slate-400">
+                    No low stock alerts.
               </div>
             ) : (
               stockAlerts.map((product) => (
-                <div key={product.id} className="p-4 sm:p-5">
+                    <div key={product.id} className="rounded-2xl border border-slate-200 p-4 dark:border-white/10">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-white">
+                            <p className="truncate text-sm font-black text-slate-950 dark:text-white">
                         {product.name}
                       </p>
 
-                      <p className="mt-1 text-xs text-slate-500">
+                            <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
                         {product.code} · {product.stack}
                       </p>
                     </div>
 
                     <span
-                      className={`rounded-full px-3 py-1 text-[11px] font-bold ${getStatusClass(
+                            className={`rounded-full px-3 py-1 text-[11px] font-black ${getStatusClass(
                         product.status
                       )}`}
                     >
@@ -344,15 +500,17 @@ export default async function InternalDashboardPage() {
                     </span>
                   </div>
 
-                  <p className="mt-3 text-xs text-slate-400">
+                        <p className="mt-3 text-xs font-semibold text-slate-500 dark:text-slate-400">
                     Minimum stock: {product.minimumStock}
                   </p>
                 </div>
               ))
             )}
+              </div>
+            </div>
           </div>
-        </div>
       </section>
+      </div>
     </div>
   );
 }

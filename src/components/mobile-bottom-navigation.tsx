@@ -173,7 +173,7 @@ function MobileIcon({ icon }: { icon: MobileNavIcon }) {
 
 export function MobileBottomNavigation({
   items,
-  theme = "dark",
+  theme = "light",
 }: {
   items: MobileNavItem[];
   theme?: "dark" | "light";
@@ -182,18 +182,18 @@ export function MobileBottomNavigation({
 
   const shellClass =
     theme === "light"
-      ? "border-slate-200 bg-white/95 text-slate-500 shadow-[0_-12px_40px_rgba(15,23,42,0.12)]"
-      : "border-white/10 bg-slate-950/95 text-slate-400 shadow-[0_-12px_40px_rgba(0,0,0,0.35)]";
+      ? "border-slate-200 bg-white/95 text-slate-500 shadow-[0_-12px_40px_rgba(15,23,42,0.08)]"
+      : "border-slate-200 bg-white/95 text-slate-500 shadow-[0_-12px_40px_rgba(15,23,42,0.08)]";
 
   const activeClass =
     theme === "light"
-      ? "bg-cyan-100 text-slate-950"
-      : "bg-cyan-300/15 text-cyan-200";
+      ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100"
+      : "bg-blue-50 text-blue-700 ring-1 ring-blue-100";
 
   const inactiveClass =
     theme === "light"
       ? "hover:bg-slate-100 hover:text-slate-950"
-      : "hover:bg-white/[0.06] hover:text-white";
+      : "hover:bg-slate-100 hover:text-slate-950";
 
   return (
     <nav

@@ -1,4 +1,4 @@
--- PostgreSQL baseline schema for Sangxvi ERP demo deployment.
+-- PostgreSQL baseline schema for Sangxvi ERP deployment.
 -- Use this on a clean Postgres database. Delete old SQLite migrations before deploying to Vercel.
 
 CREATE TYPE "UserRole" AS ENUM (

@@ -1,16 +1,46 @@
 import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
 import { PasswordInput } from "@/components/password-input";
+import { TeamFeedbackToast, type TeamFeedbackMessage } from "@/components/team-feedback-toast";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { UserRole, UserStatus } from "@/generated/prisma/client";
-import { createUserAction, resetUserPasswordAction } from "./actions";
+import {
+  createUserAction,
+  resetUserPasswordAction,
+} from "./actions";
+import { UsersDirectoryClient } from "./users-directory-client";
+
+const roleLabels: Record<UserRole, string> = {
+  OWNER: "Owner",
+  MANAGER: "Manager",
+  ACCOUNTANT: "Accountant",
+
+  DISPATCH_TEAM: "Physical Dispatch Team",
+  ORDER_TEAM: "Order Receiving Team",
+  QC_TEAM: "QC Team",
+  DRIVER_TRANSPORT: "Driver / Transport",
+  COLLECTION_TEAM: "Collection Team",
+  SALES_FIELD_TEAM: "Sales / Field Team",
+  DEALER: "Dealer",
+};
+
+const roleOptions = Object.values(UserRole);
+const statusOptions = Object.values(UserStatus);
+
+const inputClass =
+  "h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-300 dark:focus:ring-cyan-300/10";
+
+const selectClass = `${inputClass} appearance-none pr-12`;
+
+const labelClass =
+  "mb-2 block text-xs font-black uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400";
 
 function SelectArrow() {
   return (
-    <div className="pointer-events-none absolute inset-y-0 right-5 flex items-center">
+    <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center">
       <svg
-        className="h-5 w-5 text-slate-300"
+        className="h-5 w-5 text-slate-500 dark:text-slate-400"
         viewBox="0 0 20 20"
         fill="none"
         aria-hidden="true"
@@ -27,145 +57,121 @@ function SelectArrow() {
   );
 }
 
-const roleLabels: Record<UserRole, string> = {
-  OWNER: "Owner",
-  MANAGER: "Manager",
-  ACCOUNTANT: "Accountant",
-  INVENTORY_TEAM: "Inventory Team",
-  DISPATCH_TEAM: "Dispatch Team",
-  QC_TEAM: "QC Team",
-  DRIVER_TRANSPORT: "Driver / Transport",
-  COLLECTION_TEAM: "Collection Team",
-  SALES_FIELD_TEAM: "Sales / Field Team",
-  DEALER: "Dealer",
-};
-
-const portalLabels: Record<UserRole, string> = {
-  OWNER: "Internal ERP",
-  MANAGER: "Internal ERP",
-  ACCOUNTANT: "Internal ERP",
-  INVENTORY_TEAM: "Internal ERP",
-  DISPATCH_TEAM: "Internal ERP",
-  QC_TEAM: "Internal ERP",
-  DRIVER_TRANSPORT: "Field / Mobile",
-  COLLECTION_TEAM: "Field / Mobile",
-  SALES_FIELD_TEAM: "Field / Mobile",
-  DEALER: "Dealer Portal",
-};
-
-const roleOptions = Object.values(UserRole);
-const statusOptions = Object.values(UserStatus);
-
 function getStatusLabel(status: UserStatus) {
-  if (status === "ACTIVE") {
-    return "Active";
-  }
-
+  if (status === "ACTIVE") return "Active";
+  if (status === "FORMER_EMPLOYEE") return "Former Employee";
   return "Inactive";
 }
 
-function getStatusClass(status: UserStatus) {
-  if (status === "ACTIVE") {
-    return "bg-emerald-300/10 text-emerald-300";
-  }
-
-  return "bg-red-300/10 text-red-300";
-}
-
-function getPasswordStatusLabel(mustChangePassword?: boolean | null) {
-  if (mustChangePassword) {
-    return "Change Required";
-  }
-
-  return "Password Active";
-}
-
-function getPasswordStatusClass(mustChangePassword?: boolean | null) {
-  if (mustChangePassword) {
-    return "bg-yellow-300/10 text-yellow-300";
-  }
-
-  return "bg-emerald-300/10 text-emerald-300";
-}
-
-function getUserManagementMessage(
-  error?: string,
-  success?: string,
-  email?: string
-) {
-  if (success === "user-created") {
-    return {
+function getMessage(error?: string, success?: string): TeamFeedbackMessage | null {
+  const successMessages: Record<string, TeamFeedbackMessage> = {
+    "user-created": {
       type: "success",
-      text: "User created successfully. The user must change password on first login.",
-    };
-  }
-
-  if (success === "password-reset") {
-    return {
+      title: "User created",
+      text: "The user can log in with the temporary password and must replace it immediately.",
+    },
+    "user-updated": {
       type: "success",
-      text: "Password reset successfully. Existing sessions were signed out, and the user can log in directly with the new password.",
-    };
-  }
+      title: "User saved",
+      text: "User profile, access, and portal details have been updated.",
+    },
+    "user-disabled": {
+      type: "success",
+      title: "User disabled",
+      text: "User access has been disabled and active sessions were cleared.",
+    },
+    "password-reset": {
+      type: "success",
+      title: "Password reset",
+      text: "Existing sessions were signed out. The user can log in with the new password.",
+    },
+    "user-archived": {
+      type: "success",
+      title: "User archived",
+      text: "Login access was stopped while historical work was preserved.",
+    },
+  };
 
-  if (error === "duplicate-email") {
-    return {
+  const errorMessages: Record<string, TeamFeedbackMessage> = {
+    "duplicate-email": {
       type: "error",
-      text: email
-        ? `A user with ${email} already exists. Use Quick Password Reset instead.`
-        : "A user with this email already exists. Use Quick Password Reset instead.",
-    };
-  }
-
-  if (error === "missing-fields") {
-    return {
+      title: "Email already exists",
+      text: "Another user already has this email address.",
+    },
+    "missing-fields": {
       type: "error",
-      text: "Full name, email, password, and role are required.",
-    };
-  }
-
-  if (error === "weak-password") {
-    return {
+      title: "Missing details",
+      text: "Full name, email, password, role, and status are required.",
+    },
+    "update-missing-fields": {
       type: "error",
-      text: "Password must be at least 8 characters.",
-    };
-  }
-
-  if (error === "missing-password-reset-fields") {
-    return {
+      title: "Update incomplete",
+      text: "User, name, email, role, and status are required.",
+    },
+    "weak-password": {
       type: "error",
+      title: "Weak password",
+      text: "Use at least 12 characters with uppercase, lowercase, number and symbol.",
+    },
+    "missing-password-reset-fields": {
+      type: "error",
+      title: "Password reset incomplete",
       text: "Please select a user and enter a new password.",
-    };
+    },
+    "user-not-found": {
+      type: "error",
+      title: "User not found",
+      text: "The selected user does not exist anymore.",
+    },
+    "invalid-role": {
+      type: "error",
+      title: "Invalid role",
+      text: "Please select a valid ERP role.",
+    },
+    "invalid-status": {
+      type: "error",
+      title: "Invalid status",
+      text: "Please select a valid user status.",
+    },
+    "permission-denied": {
+      type: "error",
+      title: "Access denied",
+      text: "Your current role cannot manage users.",
+    },
+    "cannot-change-own-access": {
+      type: "error",
+      title: "Self access protected",
+      text: "You cannot change your own role or disable your own account from this page.",
+    },
+    "cannot-delete-own-account": {
+      type: "error",
+      title: "Current account protected",
+      text: "You cannot delete the account you are currently using.",
+    },
+    "last-owner-required": {
+      type: "error",
+      title: "Owner required",
+      text: "At least one active owner account must remain in the ERP.",
+    },
+  };
+
+  if (success && successMessages[success]) {
+    return successMessages[success];
   }
 
-  if (error === "user-not-found") {
-    return {
-      type: "error",
-      text: "Selected user was not found.",
-    };
-  }
-
-  if (error === "invalid-role") {
-    return {
-      type: "error",
-      text: "Please select a valid role.",
-    };
-  }
-
-  if (error === "invalid-status") {
-    return {
-      type: "error",
-      text: "Please select a valid status.",
-    };
-  }
-
-  if (error === "permission-denied") {
-    return {
-      type: "error",
-      text: "You do not have permission to manage users.",
-    };
+  if (error && errorMessages[error]) {
+    return errorMessages[error];
   }
 
   return null;
+}
+
+function isRole(value?: string): value is UserRole {
+  return Boolean(value && roleOptions.includes(value as UserRole));
+}
+
+function isStatus(value?: string): value is UserStatus {
+  return Boolean(value && statusOptions.includes(value as UserStatus));
 }
 
 export default async function UsersPage({
@@ -174,18 +180,14 @@ export default async function UsersPage({
   searchParams?: Promise<{
     error?: string;
     success?: string;
-    email?: string;
+    q?: string;
+    role?: string;
+    status?: string;
   }>;
 }) {
   const params = await searchParams;
-
-  const message = getUserManagementMessage(
-    params?.error,
-    params?.success,
-    params?.email
-  );
-
-  const { hasAccess } = await checkPermission("manage_users", "/internal/users");
+  const message = getMessage(params?.error, params?.success);
+  const { currentUser, hasAccess } = await checkPermission("manage_users", "/internal/users");
 
   if (!hasAccess) {
     return (
@@ -198,7 +200,11 @@ export default async function UsersPage({
     );
   }
 
+  const selectedRole = isRole(params?.role) ? params?.role : "ALL";
+  const selectedStatus = isStatus(params?.status) ? params?.status : "ALL";
+
   const users = await prisma.user.findMany({
+    include: { roleAssignments: true },
     orderBy: [
       {
         role: "asc",
@@ -211,131 +217,202 @@ export default async function UsersPage({
 
   const totalUsers = users.length;
   const activeUsers = users.filter((user) => user.status === "ACTIVE").length;
+  const inactiveUsers = users.filter((user) => user.status === "INACTIVE").length;
   const dealerUsers = users.filter((user) => user.role === "DEALER").length;
-  const passwordChangePending = users.filter(
-    (user) => user.mustChangePassword
-  ).length;
+  const passwordChangePending = users.filter((user) => user.mustChangePassword).length;
 
   const userStats = [
-    {
-      label: "Total Users",
-      value: String(totalUsers),
-    },
-    {
-      label: "Active Users",
-      value: String(activeUsers),
-    },
-    {
-      label: "Dealer Accounts",
-      value: String(dealerUsers),
-    },
-    {
-      label: "Password Change Pending",
-      value: String(passwordChangePending),
-    },
-  ];
+    ["Total Users", totalUsers, "text-slate-950 dark:text-slate-100"],
+    ["Active Users", activeUsers, "text-emerald-700 dark:text-emerald-300"],
+    ["Inactive Users", inactiveUsers, "text-rose-700 dark:text-rose-300"],
+    ["Dealer Accounts", dealerUsers, "text-blue-700 dark:text-cyan-300"],
+    ["Password Pending", passwordChangePending, "text-amber-700 dark:text-amber-300"],
+  ] as const;
 
   return (
-    <div>
-      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-300 sm:text-sm">
-            User Management
-          </p>
+    <div className="space-y-8">
+      <TeamFeedbackToast message={message} />
 
-          <h1 className="mt-2 text-2xl font-bold sm:mt-3 sm:text-3xl md:text-5xl">
-            Team & Access Control
-          </h1>
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.35em] text-blue-600 dark:text-cyan-300">
+              Access Control
+            </p>
 
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-slate-300 sm:mt-4 sm:text-sm sm:leading-6">
-            Create employees, dealers, drivers, and team members. Each user
-            receives portal and module access based on their assigned role.
-          </p>
+            <h1 className="mt-3 text-4xl font-black text-slate-950 dark:text-slate-100 md:text-5xl">
+              Users & Roles
+            </h1>
+
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+              Create users, assign ERP roles, disable access, reset temporary passwords,
+              and keep an audit trail for every access change.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/account/change-password"
+              className="rounded-2xl border border-slate-200 px-5 py-3 text-center text-sm font-black text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              My Password
+            </Link>
+
+            <a
+              href="#create-user-form"
+              className="rounded-2xl bg-blue-600 px-5 py-3 text-center text-sm font-black text-white transition hover:bg-blue-700 dark:bg-cyan-400 dark:text-slate-950 dark:hover:bg-cyan-300"
+            >
+              + Add User
+            </a>
+          </div>
         </div>
+      </section>
 
-        <div className="flex w-full flex-col gap-3 sm:flex-row md:w-auto">
-          <Link
-            href="/account/change-password"
-            className="rounded-2xl border border-white/10 px-5 py-3 text-center text-sm font-bold text-slate-200 transition hover:bg-white/[0.04]"
-          >
-            My Password
-          </Link>
-
-          <a
-            href="#create-user-form"
-            className="rounded-2xl bg-cyan-300 px-5 py-3 text-center text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
-          >
-            + Add New User
-          </a>
-        </div>
-      </div>
-
-      {message && (
-        <div
-          className={`mt-8 rounded-2xl border px-5 py-4 text-sm font-semibold ${
-            message.type === "success"
-              ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-300"
-              : "border-red-300/20 bg-red-300/10 text-red-300"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 xl:grid-cols-4">
-        {userStats.map((stat) => (
+      <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
+        {userStats.map(([label, value, color]) => (
           <div
-            key={stat.label}
-            className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:rounded-3xl sm:p-6"
+            key={label}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none"
           >
-            <p className="text-sm text-slate-400">{stat.label}</p>
-            <h2 className="mt-2 text-2xl font-bold sm:mt-3 sm:text-3xl">
-              {stat.value}
-            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
+            <p className={`mt-3 text-3xl font-black ${color}`}>{value}</p>
           </div>
         ))}
-      </div>
+      </section>
 
-      <section className="mt-6 rounded-3xl border border-cyan-300/20 bg-cyan-300/[0.05] p-4 sm:p-6">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="max-w-2xl">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-300">
-              Quick Password Reset
-            </p>
+      <section className="grid gap-6 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.3fr)]">
+        <div
+          id="create-user-form"
+          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none"
+        >
+          <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-600 dark:text-cyan-300">
+            Create Account
+          </p>
 
-            <h2 className="mt-2 text-2xl font-bold">Select user and reset</h2>
+          <h2 className="mt-3 text-2xl font-black text-slate-950 dark:text-slate-100">
+            Add new user
+          </h2>
 
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Use this instead of scrolling inside the table. Select any user,
-              set a new password, and the user can log in with it directly.
-              Existing sessions are signed out automatically.
-            </p>
-          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            New users get an active password and can log in directly.
+          </p>
 
-          <form
-            action={resetUserPasswordAction}
-            className="grid w-full gap-4 xl:max-w-3xl xl:grid-cols-[1.4fr_1fr_auto]"
-          >
+          <form action={createUserAction} className="mt-6 space-y-4">
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                Select User
-              </label>
+              <label className={labelClass}>Full Name</label>
+              <input
+                name="name"
+                type="text"
+                placeholder="User full name"
+                className={inputClass}
+                required
+              />
+            </div>
 
+            <div>
+              <label className={labelClass}>Email</label>
+              <input
+                name="email"
+                type="email"
+                placeholder="user@sanghvi.com"
+                className={inputClass}
+                required
+              />
+            </div>
+
+            <PasswordInput
+              name="password"
+              label="Temporary Password"
+              placeholder="12+ characters with number and symbol"
+              autoComplete="new-password"
+            />
+
+            <div>
+              <label className={labelClass}>Phone Number</label>
+              <input
+                name="phone"
+                type="text"
+                placeholder="Phone number"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className={labelClass}>Role</label>
+                <div className="relative">
+                  <select name="primaryRole" className={selectClass} required defaultValue="MANAGER">
+                    {roleOptions.map((role) => (
+                      <option key={role} value={role}>
+                        {roleLabels[role]}
+                      </option>
+                    ))}
+                  </select>
+                  <SelectArrow />
+                </div>
+              </div>
+
+              <div>
+                <label className={labelClass}>Status</label>
+                <div className="relative">
+                  <select name="status" className={selectClass} required defaultValue="ACTIVE">
+                    {statusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {getStatusLabel(status)}
+                      </option>
+                    ))}
+                  </select>
+                  <SelectArrow />
+                </div>
+              </div>
+            </div>
+
+
+            <div>
+              <label className={labelClass}>Additional Roles</label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {roleOptions.map((role) => (
+                  <label key={role} className="flex min-h-12 items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold dark:border-slate-700">
+                    <input type="checkbox" name="roles" value={role} /> {roleLabels[role]}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div><label className={labelClass}>Attendance Location</label><div className="relative"><select name="geofenceMode" className={selectClass} defaultValue="OFFICE_REQUIRED"><option value="OFFICE_REQUIRED">Office Geofence Required</option><option value="ANYWHERE">Work From Anywhere</option></select><SelectArrow /></div></div>
+            <button
+              type="submit"
+              className="w-full rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white transition hover:bg-blue-700 dark:bg-cyan-400 dark:text-slate-950 dark:hover:bg-cyan-300"
+            >
+              Create User
+            </button>
+          </form>
+        </div>
+
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-6 dark:border-cyan-400/20 dark:bg-cyan-400/5">
+          <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-600 dark:text-cyan-300">
+            Password Reset
+          </p>
+
+          <h2 className="mt-3 text-2xl font-black text-slate-950 dark:text-slate-100">
+            Reset access safely
+          </h2>
+
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            Resetting a password signs out existing sessions. Use direct login unless you explicitly need a forced password change.
+          </p>
+
+          <form action={resetUserPasswordAction} className="mt-6 grid gap-4 xl:grid-cols-[1.25fr_1fr_0.9fr_auto] xl:items-end">
+            <div>
+              <label className={labelClass}>Select User</label>
               <div className="relative">
-                <select
-                  name="userId"
-                  className="h-14 w-full appearance-none rounded-2xl border border-white/10 bg-slate-900 px-4 pr-14 text-sm text-slate-100 outline-none transition focus:border-cyan-300"
-                  required
-                >
+                <select name="userId" className={selectClass} required defaultValue="">
                   <option value="">Choose user</option>
-
                   {users.map((user) => (
                     <option key={user.id} value={user.id}>
                       {user.name} — {user.email} — {roleLabels[user.role]}
                     </option>
                   ))}
                 </select>
-
                 <SelectArrow />
               </div>
             </div>
@@ -343,330 +420,52 @@ export default async function UsersPage({
             <PasswordInput
               name="password"
               label="New Password"
-              placeholder="New password"
-              autoComplete="new-password"
-            />
-
-            <div className="xl:self-end">
-              <button
-                type="submit"
-                className="h-14 w-full rounded-2xl bg-cyan-300 px-5 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 xl:w-auto"
-              >
-                Reset Password
-              </button>
-            </div>
-          </form>
-        </div>
-      </section>
-
-      <div className="mt-8 grid gap-6 2xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,2.2fr)]">
-        <div
-          id="create-user-form"
-          className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:rounded-3xl sm:p-6"
-        >
-          <h2 className="text-xl font-bold">Create User</h2>
-
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            Add a new system user and assign the correct role. New users must
-            change their password on first login.
-          </p>
-
-          <form action={createUserAction} className="mt-6 space-y-4">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                Full Name
-              </label>
-
-              <input
-                name="name"
-                type="text"
-                placeholder="Example: Amit Sharma"
-                className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-300"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                Email
-              </label>
-
-              <input
-                name="email"
-                type="email"
-                placeholder="user@sangxvi.com"
-                className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-300"
-                required
-              />
-            </div>
-
-            <PasswordInput
-              name="password"
-              label="Password"
-              placeholder="Temporary password"
+              placeholder="12+ characters with number and symbol"
               autoComplete="new-password"
             />
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                Phone Number
-              </label>
-
-              <input
-                name="phone"
-                type="text"
-                placeholder="+91 98765 43210"
-                className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-300"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                Assign Role
-              </label>
-
+              <label className={labelClass}>Login Rule</label>
               <div className="relative">
-                <select
-                  name="role"
-                  className="h-14 w-full appearance-none rounded-2xl border border-white/10 bg-slate-900 px-4 pr-14 text-sm text-slate-100 outline-none transition focus:border-cyan-300"
-                  required
-                >
-                  {roleOptions.map((role) => (
-                    <option key={role} value={role}>
-                      {roleLabels[role]}
-                    </option>
-                  ))}
+                <select name="mustChangePassword" className={selectClass} defaultValue="false">
+                  <option value="false">Password active</option>
+                  <option value="true">Require change</option>
                 </select>
-
-                <SelectArrow />
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                Status
-              </label>
-
-              <div className="relative">
-                <select
-                  name="status"
-                  className="h-14 w-full appearance-none rounded-2xl border border-white/10 bg-slate-900 px-4 pr-14 text-sm text-slate-100 outline-none transition focus:border-cyan-300"
-                  required
-                >
-                  {statusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {getStatusLabel(status)}
-                    </option>
-                  ))}
-                </select>
-
                 <SelectArrow />
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
+              className="h-14 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 dark:bg-cyan-400 dark:text-slate-950 dark:hover:bg-cyan-300"
             >
-              Save User
+              Reset
             </button>
           </form>
         </div>
+      </section>
 
-        <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
-          <div className="border-b border-white/10 p-4 sm:p-6">
-            <h2 className="text-xl font-bold">Users List</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Password reset is handled from the Quick Password Reset panel
-              above, so this table stays easy to scan.
-            </p>
-          </div>
-
-          <div className="grid gap-3 p-4 xl:hidden">
-            {users.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-6 text-center text-sm text-slate-400">
-                No users found in the database.
-              </div>
-            ) : (
-              users.map((user) => (
-                <article
-                  key={`mobile-${user.id}`}
-                  className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-bold text-white">
-                        {user.name}
-                      </h3>
-                      <p className="mt-1 break-words text-xs text-slate-500">
-                        {user.email}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`inline-flex shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-bold ${getStatusClass(
-                        user.status
-                      )}`}
-                    >
-                      {getStatusLabel(user.status)}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
-                        Role
-                      </p>
-                      <p className="mt-2 text-xs font-bold text-cyan-300">
-                        {roleLabels[user.role]}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
-                        Portal
-                      </p>
-                      <p className="mt-2 text-xs font-bold text-slate-100">
-                        {portalLabels[user.role]}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
-                        Password
-                      </p>
-                      <p
-                        className={`mt-2 inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${getPasswordStatusClass(
-                          user.mustChangePassword
-                        )}`}
-                      >
-                        {getPasswordStatusLabel(user.mustChangePassword)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
-                        Phone
-                      </p>
-                      <p className="mt-2 text-xs font-bold text-slate-100">
-                        {user.phone || "Not provided"}
-                      </p>
-                    </div>
-                  </div>
-                </article>
-              ))
-            )}
-          </div>
-
-          <div className="hidden max-w-full overflow-x-auto overscroll-x-contain xl:block">
-            <table className="w-full min-w-[800px] table-fixed text-left text-sm">
-              <colgroup>
-                <col className="w-[29%]" />
-                <col className="w-[21%]" />
-                <col className="w-[18%]" />
-                <col className="w-[14%]" />
-                <col className="w-[18%]" />
-              </colgroup>
-              <thead className="bg-white/[0.04] text-xs uppercase tracking-[0.14em] text-slate-400">
-                <tr>
-                  <th className="px-4 py-4 font-semibold">User</th>
-                  <th className="px-4 py-4 font-semibold">Role</th>
-                  <th className="px-4 py-4 font-semibold">Portal</th>
-                  <th className="px-4 py-4 font-semibold">Status</th>
-                  <th className="px-4 py-4 font-semibold">Password</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-white/10">
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td className="px-4 py-5">
-                      <div className="max-w-[260px]">
-                        <p className="font-bold text-white">{user.name}</p>
-                        <p className="mt-1 break-words text-xs text-slate-500">
-                          {user.email}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {user.phone || "No phone"}
-                        </p>
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-5">
-                      <span className="inline-flex whitespace-nowrap rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-300">
-                        {roleLabels[user.role]}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-5">{portalLabels[user.role]}</td>
-
-                    <td className="px-4 py-5">
-                      <span
-                        className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${getStatusClass(
-                          user.status
-                        )}`}
-                      >
-                        {getStatusLabel(user.status)}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-5">
-                      <span
-                        className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${getPasswordStatusClass(
-                          user.mustChangePassword
-                        )}`}
-                      >
-                        {getPasswordStatusLabel(user.mustChangePassword)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-
-                {users.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-10 text-center text-sm text-slate-400"
-                    >
-                      No users found in the database.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-        <h2 className="text-xl font-bold">How password reset works</h2>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl bg-white/[0.04] p-5">
-            <p className="font-semibold text-cyan-300">1. Owner selects user</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Use the Quick Password Reset panel to select the employee, dealer,
-              or field user.
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-white/[0.04] p-5">
-            <p className="font-semibold text-cyan-300">2. New password</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Owner sets the user&apos;s new password. Old sessions are signed out
-              automatically.
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-white/[0.04] p-5">
-            <p className="font-semibold text-cyan-300">3. User logs in</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              User logs in directly with the password set by the owner. No
-              additional password-change step is required.
-            </p>
-          </div>
-        </div>
-      </div>
+      <UsersDirectoryClient
+        users={users.map((user) => ({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          roles: [...new Set([user.role, ...user.roleAssignments.map((item) => item.role)])],
+          status: user.status,
+          geofenceMode: user.geofenceMode,
+          archivedAt: user.archivedAt?.toISOString() ?? null,
+          exitReason: user.exitReason,
+          mustChangePassword: user.mustChangePassword,
+        }))}
+        currentUserId={currentUser.id}
+        roleOptions={roleOptions}
+        statusOptions={statusOptions}
+        initialQuery={params?.q ?? ""}
+        initialRole={selectedRole}
+        initialStatus={selectedStatus}
+      />
     </div>
   );
 }

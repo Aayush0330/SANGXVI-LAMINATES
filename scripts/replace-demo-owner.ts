@@ -17,7 +17,7 @@ async function main() {
     console.log("");
     console.log("Run like this:");
     console.log(
-      'REAL_OWNER_NAME="Aayush Chandak" REAL_OWNER_EMAIL="ayush@example.com" REAL_OWNER_PASSWORD="StrongPass123" REAL_OWNER_PHONE="9876543210" npx tsx scripts/replace-demo-owner.ts'
+      "Set REAL_OWNER_NAME, REAL_OWNER_EMAIL, REAL_OWNER_PASSWORD and REAL_OWNER_PHONE, then run this script."
     );
     process.exitCode = 1;
     return;
@@ -30,7 +30,9 @@ async function main() {
   }
 
   if (!isStrongEnoughPassword(password)) {
-    throw new Error("REAL_OWNER_PASSWORD must be at least 8 characters.");
+    throw new Error(
+      "REAL_OWNER_PASSWORD must be at least 12 characters and include uppercase, lowercase, number and symbol.",
+    );
   }
 
   const owner = await prisma.user.findFirst({

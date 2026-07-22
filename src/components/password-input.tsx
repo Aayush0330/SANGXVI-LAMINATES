@@ -91,7 +91,7 @@ export function PasswordInput({
       {label ? (
         <label
           htmlFor={name}
-          className="mb-2 block text-sm font-medium text-slate-200"
+          className="mb-2 block text-sm font-medium text-slate-700"
         >
           {label}
         </label>
@@ -104,14 +104,14 @@ export function PasswordInput({
           type={isVisible ? "text" : "password"}
           placeholder={placeholder}
           autoComplete={autoComplete}
-          className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-5 pr-16 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-300"
+          className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-5 pr-16 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500"
           required={required}
         />
 
         <button
           type="button"
           onClick={() => setIsVisible((current) => !current)}
-          className="absolute inset-y-0 right-3 my-auto inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-cyan-300/10 hover:text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/30"
+          className="absolute inset-y-0 right-3 my-auto inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-blue-50 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
           aria-label={isVisible ? "Hide password" : "Show password"}
           title={isVisible ? "Hide password" : "Show password"}
         >

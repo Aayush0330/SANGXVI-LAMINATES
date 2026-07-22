@@ -1,968 +1,1041 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import {
+  OrderStatus,
+  PhysicalCheckIssueType,
+  PhysicalCheckStatus,
+  ProductStatus,
+} from "@/generated/prisma/client";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
+import { createWorkflowNotification } from "@/lib/notifications";
+import { getCancellationClosureQuantities } from "@/lib/order-fulfillment";
+import { recordOrderStatusHistory, type HistoryClient } from "@/lib/order-status-history";
+import { hasAnyRole } from "@/lib/permissions";
 import { createSecurityAuditLog } from "@/lib/security-audit";
-import {
-  recordOrderStatusHistory,
-  type HistoryClient,
-} from "@/lib/order-status-history";
 import {
   closeStockBlockTimeline,
   recordStockBlockTimeline,
 } from "@/lib/stock-block-timeline";
 import {
-  OrderStatus,
-  ProductStatus,
-  UserRole,
-  UserStatus,
-} from "@/generated/prisma/client";
-import { getCancellationClosureQuantities } from "@/lib/order-fulfillment";
+  cancelAutomatedTasksForOrder,
+  ensureQcReviewTask,
+  resumeAutomatedTask,
+  resumeAutomatedTasksForOrder,
+  setAutomatedTaskStatus,
+  workflowTaskKeys,
+} from "@/lib/workflow-tasks";
 
+const PHYSICAL_ROLES = ["owner", "manager", "dispatch_team"] as const;
+const MANAGER_ROLES = ["owner", "manager"] as const;
 const CANCELLATION_REQUESTED_STATUS = "CANCELLATION_REQUESTED" as OrderStatus;
 
-const INVENTORY_WORKFLOW_ROLES = ["owner", "manager", "inventory_team"];
-const DISPATCH_WORKFLOW_ROLES = ["owner", "manager", "dispatch_team"];
-const CONTINUE_PARTIAL_ORDER_ROLES = [
-  "owner",
-  "manager",
-  "inventory_team",
-  "dispatch_team",
-];
-
-function canHandleInventoryWorkflow(role: string) {
-  return INVENTORY_WORKFLOW_ROLES.includes(role);
+function cleanText(value: FormDataEntryValue | null) {
+  return String(value ?? "").trim();
 }
 
-function canHandleDispatchWorkflow(role: string) {
-  return DISPATCH_WORKFLOW_ROLES.includes(role);
-}
-
-function canHandleContinuePartialWorkflow(role: string) {
-  return CONTINUE_PARTIAL_ORDER_ROLES.includes(role);
+function dispatchUrl(type: "error" | "success", value: string) {
+  return `/internal/dispatch?${type}=${encodeURIComponent(value)}`;
 }
 
 function getProductStatus(quantity: number, minimumStock: number) {
-  if (quantity <= 0) {
-    return ProductStatus.OUT_OF_STOCK;
-  }
-
-  if (quantity <= minimumStock) {
-    return ProductStatus.LOW_STOCK;
-  }
-
+  if (quantity <= 0) return ProductStatus.OUT_OF_STOCK;
+  if (quantity <= minimumStock) return ProductStatus.LOW_STOCK;
   return ProductStatus.AVAILABLE;
 }
 
-function isStockBlockAllowed(status: OrderStatus) {
-  const allowedStatuses: OrderStatus[] = [
-    OrderStatus.NEW_ORDER,
-    OrderStatus.STOCK_CHECKED,
-    OrderStatus.BACKORDERED,
-    OrderStatus.PARTIALLY_BLOCKED,
-    OrderStatus.PARTIALLY_DELIVERED,
-  ];
-
-  return allowedStatuses.includes(status);
+function parseIssueType(value: string) {
+  const valid = new Set(Object.values(PhysicalCheckIssueType));
+  return valid.has(value as PhysicalCheckIssueType)
+    ? (value as PhysicalCheckIssueType)
+    : null;
 }
 
-function isReadyForDispatchAllowed(status: OrderStatus) {
-  const allowedStatuses: OrderStatus[] = [
-    OrderStatus.STOCK_BLOCKED,
-    OrderStatus.PARTIALLY_BLOCKED,
-  ];
+async function assertPhysicalAccess() {
+  const { currentUser, hasAccess } = await checkPermission(
+    "manage_dispatch",
+    "/internal/dispatch",
+  );
 
-  return allowedStatuses.includes(status);
+  if (!hasAccess || !hasAnyRole(currentUser.roles, PHYSICAL_ROLES)) {
+    redirect(dispatchUrl("error", "permission-denied"));
+  }
+
+  return currentUser;
 }
 
-function isQuantityAdjustmentAllowed(status: OrderStatus) {
-  const allowedStatuses: OrderStatus[] = [
-    OrderStatus.NEW_ORDER,
-    OrderStatus.STOCK_CHECKED,
-    OrderStatus.BACKORDERED,
-    OrderStatus.PARTIALLY_BLOCKED,
-    OrderStatus.PARTIALLY_DELIVERED,
-  ];
-
-  return allowedStatuses.includes(status);
-}
-
-function calculateNextOpenOrderStatus({
-  currentStatus,
-  requested,
-  blocked,
-  delivered,
-  cancelled,
-}: {
-  currentStatus: OrderStatus;
-  requested: number;
-  blocked: number;
-  delivered: number;
-  cancelled: number;
-}) {
-  const openQuantity = Math.max(0, requested - delivered - cancelled);
-  const unblockedQuantity = Math.max(0, openQuantity - blocked);
-
-  if (openQuantity <= 0) {
-    if (delivered > 0) {
-      return OrderStatus.DELIVERED;
-    }
-
-    return OrderStatus.CANCELLED;
-  }
-
-  if (blocked > 0 && unblockedQuantity === 0) {
-    return OrderStatus.STOCK_BLOCKED;
-  }
-
-  if (blocked > 0 && unblockedQuantity > 0) {
-    return OrderStatus.PARTIALLY_BLOCKED;
-  }
-
-  if (currentStatus === OrderStatus.NEW_ORDER) {
-    return OrderStatus.NEW_ORDER;
-  }
-
-  return OrderStatus.BACKORDERED;
-}
-
-export async function markStockCheckedAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
-
-  if (!hasAccess || !canHandleInventoryWorkflow(currentUser.role)) {
-    redirect("/internal/dispatch?error=permission-denied");
-  }
-
-  const orderId = String(formData.get("orderId") ?? "");
-
-  if (!orderId) {
-    redirect("/internal/dispatch?error=missing-order");
-  }
-
-  const order = await prisma.order.findUnique({
+async function getAccessibleAssignment(
+  assignmentId: string,
+  currentUser: Awaited<ReturnType<typeof assertPhysicalAccess>>,
+) {
+  return prisma.orderPhysicalAssignment.findFirst({
     where: {
-      id: orderId,
+      id: assignmentId,
+      ...(hasAnyRole(currentUser.roles, MANAGER_ROLES)
+        ? {}
+        : { team: { members: { some: { userId: currentUser.id } } } }),
+    },
+    include: {
+      team: {
+        include: {
+          members: {
+            where: { user: { status: "ACTIVE" } },
+            select: { userId: true },
+          },
+        },
+      },
+      order: {
+        include: {
+          dealer: { select: { id: true, name: true } },
+          physicalAssignments: { select: { id: true, status: true } },
+        },
+      },
+      items: {
+        include: {
+          orderItem: {
+            include: { product: true },
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      },
     },
   });
-
-  if (!order) {
-    redirect("/internal/dispatch?error=order-not-found");
-  }
-
-  if (order.status !== OrderStatus.NEW_ORDER) {
-    redirect("/internal/dispatch?error=invalid-status");
-  }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: {
-        id: order.id,
-      },
-      data: {
-        status: OrderStatus.STOCK_CHECKED,
-      },
-    });
-
-    await recordOrderStatusHistory({
-      client: tx as unknown as HistoryClient,
-      orderId: order.id,
-      fromStatus: order.status,
-      toStatus: OrderStatus.STOCK_CHECKED,
-      title: "Stock Checked",
-      description: "Inventory availability checked for this order.",
-      currentUser,
-    });
-  });
-
-  revalidatePath("/internal/dispatch");
-  revalidatePath("/dealer/orders");
-  revalidatePath("/internal/dashboard");
-
-  redirect("/internal/dispatch?success=stock-checked");
 }
 
-export async function adjustOrderItemQuantityAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
+export async function startPhysicalCheckAction(formData: FormData) {
+  const currentUser = await assertPhysicalAccess();
+  const assignmentId = cleanText(formData.get("assignmentId"));
 
-  if (!hasAccess || !canHandleInventoryWorkflow(currentUser.role)) {
-    redirect("/internal/dispatch?error=permission-denied");
+  if (!assignmentId) {
+    redirect(dispatchUrl("error", "missing-assignment"));
   }
 
-  const orderItemId = String(formData.get("orderItemId") ?? "");
-  const newQuantity = Number(formData.get("newQuantity") ?? 0);
+  const assignment = await getAccessibleAssignment(assignmentId, currentUser);
 
-  if (!orderItemId) {
-    redirect("/internal/dispatch?error=missing-order-item");
+  if (!assignment) {
+    redirect(dispatchUrl("error", "assignment-not-found"));
   }
 
-  if (Number.isNaN(newQuantity) || newQuantity <= 0) {
-    redirect("/internal/dispatch?error=invalid-adjust-quantity");
+  const canStartCheck = [
+    PhysicalCheckStatus.ASSIGNED,
+    PhysicalCheckStatus.QC_REWORK,
+  ].some((status) => status === assignment.status);
+
+  if (!canStartCheck) {
+    redirect(dispatchUrl("error", "invalid-assignment-status"));
   }
 
-  await prisma
-    .$transaction(async (tx) => {
-      const orderItem = await tx.orderItem.findUnique({
-        where: {
-          id: orderItemId,
-        },
-        include: {
-          order: true,
-          product: true,
-        },
+  const previousOrderStatus = assignment.order.status;
+  const startingQcRework =
+    assignment.status === PhysicalCheckStatus.QC_REWORK;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orderPhysicalAssignment.update({
+      where: { id: assignment.id },
+      data: {
+        status: PhysicalCheckStatus.IN_PROGRESS,
+        startedById: currentUser.id,
+        startedByName: currentUser.name,
+        startedAt: new Date(),
+        issueType: null,
+        issueNotes: null,
+      },
+    });
+
+    if (assignment.status === PhysicalCheckStatus.QC_REWORK) {
+      await setAutomatedTaskStatus({
+        client: tx,
+        automationKey: workflowTaskKeys.qcRework(assignment.id),
+        status: "IN_PROGRESS",
+        actor: currentUser,
+        message: `${currentUser.name} started the QC rework cycle.`,
       });
-
-      if (!orderItem) {
-        throw new Error("ORDER_ITEM_NOT_FOUND");
-      }
-
-      if (!isQuantityAdjustmentAllowed(orderItem.order.status)) {
-        throw new Error("INVALID_STATUS");
-      }
-
-      const deliveredQuantity = orderItem.deliveredQuantity ?? 0;
-      const cancelledQuantity = orderItem.cancelledQuantity ?? 0;
-      const dealerRequestedQuantity =
-        orderItem.requestedQuantity && orderItem.requestedQuantity > 0
-          ? orderItem.requestedQuantity
-          : orderItem.quantity;
-      const minimumAllowedQuantity = deliveredQuantity + cancelledQuantity;
-
-      if (newQuantity < minimumAllowedQuantity) {
-        throw new Error("INVALID_ADJUST_QUANTITY");
-      }
-
-      if (newQuantity > dealerRequestedQuantity) {
-        throw new Error("APPROVED_EXCEEDS_REQUESTED");
-      }
-
-      const maxBlockedNeeded = Math.max(
-        0,
-        newQuantity - deliveredQuantity - cancelledQuantity,
-      );
-      const quantityToRelease = Math.max(
-        0,
-        orderItem.blockedQuantity - maxBlockedNeeded,
-      );
-      const nextBlockedQuantity = orderItem.blockedQuantity - quantityToRelease;
-
-      if (quantityToRelease > 0) {
-        const nextAvailableQuantity =
-          orderItem.product.quantity + quantityToRelease;
-        const nextBlockedStock = Math.max(
-          0,
-          orderItem.product.blocked - quantityToRelease,
-        );
-
-        await tx.product.update({
-          where: {
-            id: orderItem.productId,
-          },
-          data: {
-            quantity: nextAvailableQuantity,
-            blocked: nextBlockedStock,
-            status: getProductStatus(
-              nextAvailableQuantity,
-              orderItem.product.minimumStock,
-            ),
-          },
-        });
-
-        await closeStockBlockTimeline({
-          client: tx,
-          orderId: orderItem.orderId,
-          orderItemId: orderItem.id,
-          productId: orderItem.productId,
-          quantity: quantityToRelease,
-          currentUser,
-          status: "RELEASED",
-          releaseReason: "ORDER_QUANTITY_ADJUSTED",
-          notes: `${quantityToRelease} quantity released because approved order quantity was adjusted.`,
-        });
-      }
-
-      await tx.orderItem.update({
-        where: {
-          id: orderItem.id,
-        },
-        data: {
-          requestedQuantity: dealerRequestedQuantity,
-          quantity: newQuantity,
-          blockedQuantity: nextBlockedQuantity,
-        },
+    } else {
+      await setAutomatedTaskStatus({
+        client: tx,
+        automationKey: workflowTaskKeys.physicalVerification(assignment.id),
+        status: "IN_PROGRESS",
+        actor: currentUser,
+        message: `${currentUser.name} started physical verification for ${assignment.order.orderNumber}.`,
       });
+    }
 
-      const orderItems = await tx.orderItem.findMany({
-        where: {
-          orderId: orderItem.orderId,
-        },
-      });
+    const assignmentStates = await tx.orderPhysicalAssignment.findMany({
+      where: { orderId: assignment.orderId },
+      select: { status: true },
+    });
+    const nextOrderStatus = assignmentStates.some(
+      (row) => row.status === PhysicalCheckStatus.ISSUE_REPORTED,
+    )
+      ? OrderStatus.PHYSICAL_CHECK_ISSUE
+      : startingQcRework || assignmentStates.some(
+            (row) => row.status === PhysicalCheckStatus.QC_REWORK,
+          )
+        ? OrderStatus.QC_REWORK
+        : OrderStatus.PHYSICAL_CHECK_IN_PROGRESS;
 
-      const requestedTotal = orderItems.reduce(
-        (total, item) => total + item.quantity,
-        0,
-      );
-      const blockedTotal = orderItems.reduce(
-        (total, item) => total + item.blockedQuantity,
-        0,
-      );
-      const deliveredTotal = orderItems.reduce(
-        (total, item) => total + (item.deliveredQuantity ?? 0),
-        0,
-      );
-      const cancelledTotal = orderItems.reduce(
-        (total, item) => total + (item.cancelledQuantity ?? 0),
-        0,
-      );
-
-      const nextStatus = calculateNextOpenOrderStatus({
-        currentStatus: orderItem.order.status,
-        requested: requestedTotal,
-        blocked: blockedTotal,
-        delivered: deliveredTotal,
-        cancelled: cancelledTotal,
-      });
-
+    if (assignment.order.status !== nextOrderStatus) {
       await tx.order.update({
-        where: {
-          id: orderItem.orderId,
-        },
-        data: {
-          status: nextStatus,
-        },
+        where: { id: assignment.orderId },
+        data: { status: nextOrderStatus },
       });
 
       await recordOrderStatusHistory({
         client: tx as unknown as HistoryClient,
-        orderId: orderItem.orderId,
-        fromStatus: orderItem.order.status,
-        toStatus: nextStatus,
-        title: "Order Quantity Adjusted",
-        description: `${orderItem.product.name} approved quantity changed from ${orderItem.quantity} to ${newQuantity}. Dealer requested quantity is ${dealerRequestedQuantity}.${
-          quantityToRelease > 0
-            ? ` ${quantityToRelease} blocked quantity released back to available stock.`
-            : ""
-        }`,
+        orderId: assignment.orderId,
+        fromStatus: previousOrderStatus,
+        toStatus: nextOrderStatus,
+        title:
+          assignment.status === PhysicalCheckStatus.QC_REWORK
+            ? "QC Rework Started"
+            : "Physical Check Started",
+        description: `${assignment.team.name} started physical verification.`,
         currentUser,
       });
-    })
-    .catch((error) => {
-      if (error instanceof Error) {
-        if (error.message === "ORDER_ITEM_NOT_FOUND") {
-          redirect("/internal/dispatch?error=order-item-not-found");
-        }
+    }
+  });
 
-        if (error.message === "INVALID_STATUS") {
-          redirect("/internal/dispatch?error=invalid-status");
-        }
-
-        if (error.message === "INVALID_ADJUST_QUANTITY") {
-          redirect("/internal/dispatch?error=invalid-adjust-quantity");
-        }
-
-        if (error.message === "APPROVED_EXCEEDS_REQUESTED") {
-          redirect("/internal/dispatch?error=approved-exceeds-requested");
-        }
-      }
-
-      throw error;
-    });
+  await createSecurityAuditLog({
+    eventType: "PHYSICAL_CHECK_STARTED",
+    user: currentUser,
+    path: "/internal/dispatch",
+    description: `${assignment.team.name} started ${assignment.order.orderNumber}.`,
+  });
 
   revalidatePath("/internal/dispatch");
-  revalidatePath("/internal/inventory");
+  revalidatePath("/internal/order-receiving");
   revalidatePath("/dealer/orders");
-  revalidatePath("/dealer/place-order");
   revalidatePath("/internal/dashboard");
+  revalidatePath("/account/tasks");
+  revalidatePath("/internal/tasks");
 
-  redirect("/internal/dispatch?success=quantity-adjusted");
+  redirect(dispatchUrl("success", "check-started"));
 }
 
-export async function approveRemainingQuantityAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
+export async function completePhysicalCheckAction(formData: FormData) {
+  const currentUser = await assertPhysicalAccess();
+  const assignmentId = cleanText(formData.get("assignmentId"));
+  const issueType = parseIssueType(cleanText(formData.get("issueType")));
+  const issueNotes = cleanText(formData.get("issueNotes"));
 
-  if (!hasAccess || !canHandleContinuePartialWorkflow(currentUser.role)) {
-    redirect("/internal/dispatch?error=permission-denied");
+  if (!assignmentId) {
+    redirect(dispatchUrl("error", "missing-assignment"));
   }
 
-  const orderId = String(formData.get("orderId") ?? "");
+  const assignment = await getAccessibleAssignment(assignmentId, currentUser);
 
-  if (!orderId) {
-    redirect("/internal/dispatch?error=missing-order");
+  if (!assignment) {
+    redirect(dispatchUrl("error", "assignment-not-found"));
   }
 
-  const allowedStatuses: OrderStatus[] = [
-    OrderStatus.BACKORDERED,
-    OrderStatus.PARTIALLY_DELIVERED,
-    OrderStatus.DELIVERED,
-    OrderStatus.INVOICE_UPLOADED,
-  ];
+  // Starting a QC rework changes the assignment status to IN_PROGRESS. Keep
+  // using the QC-rejection metadata so completion, blockers and audit events
+  // continue to synchronize the rework task instead of the original physical
+  // verification task.
+  const isQcRework =
+    assignment.status === PhysicalCheckStatus.QC_REWORK ||
+    Boolean(assignment.qcRejectedAt);
 
-  await prisma
-    .$transaction(async (tx) => {
-      const order = await tx.order.findUnique({
-        where: {
-          id: orderId,
-        },
-        include: {
-          items: {
-            include: {
-              product: true,
-            },
-          },
-        },
-      });
+  const canCompleteCheck = [
+    PhysicalCheckStatus.IN_PROGRESS,
+    PhysicalCheckStatus.ISSUE_REPORTED,
+    PhysicalCheckStatus.QC_REWORK,
+  ].some((status) => status === assignment.status);
 
-      if (!order) {
-        throw new Error("ORDER_NOT_FOUND");
-      }
+  if (!canCompleteCheck) {
+    redirect(dispatchUrl("error", "invalid-assignment-status"));
+  }
 
-      if (!allowedStatuses.includes(order.status)) {
-        throw new Error("INVALID_STATUS");
-      }
+  const checkedItems = assignment.items.map((item) => {
+    const verifiedQuantity = Number(
+      formData.get(`verifiedQuantity__${item.id}`) ?? -1,
+    );
+    const damagedQuantity = Number(
+      formData.get(`damagedQuantity__${item.id}`) ?? 0,
+    );
+    const notes = cleanText(formData.get(`notes__${item.id}`));
 
-      const existingApprovedTotal = order.items.reduce(
-        (total, item) => total + item.quantity,
-        0,
-      );
-      const existingBlockedTotal = order.items.reduce(
-        (total, item) => total + item.blockedQuantity,
-        0,
-      );
-      const existingDeliveredTotal = order.items.reduce(
-        (total, item) => total + (item.deliveredQuantity ?? 0),
-        0,
-      );
-      const existingCancelledTotal = order.items.reduce(
-        (total, item) => total + (item.cancelledQuantity ?? 0),
-        0,
-      );
-      const existingOpenApprovedQuantity = Math.max(
-        0,
-        existingApprovedTotal - existingDeliveredTotal - existingCancelledTotal,
-      );
+    return {
+      item,
+      verifiedQuantity,
+      damagedQuantity,
+      shortQuantity: Math.max(0, item.assignedQuantity - verifiedQuantity),
+      notes,
+    };
+  });
 
-      if (existingOpenApprovedQuantity > 0 || existingBlockedTotal > 0) {
-        throw new Error("APPROVED_WORK_NOT_FINISHED");
-      }
+  const invalidItem = checkedItems.some(
+    ({ item, verifiedQuantity, damagedQuantity }) =>
+      !Number.isInteger(verifiedQuantity) ||
+      verifiedQuantity < 0 ||
+      verifiedQuantity > item.assignedQuantity ||
+      !Number.isInteger(damagedQuantity) ||
+      damagedQuantity < 0 ||
+      damagedQuantity > verifiedQuantity,
+  );
 
-      let approvedNow = 0;
-      let approvedTotalAfter = 0;
-      let blockedTotalAfter = 0;
-      let deliveredTotalAfter = 0;
-      let cancelledTotalAfter = 0;
+  if (invalidItem) {
+    redirect(dispatchUrl("error", "invalid-check-quantity"));
+  }
 
-      for (const item of order.items) {
-        const dealerRequestedQuantity =
-          item.requestedQuantity && item.requestedQuantity > 0
-            ? item.requestedQuantity
-            : item.quantity;
+  const hasQuantityIssue = checkedItems.some(
+    ({ shortQuantity, damagedQuantity }) =>
+      shortQuantity > 0 || damagedQuantity > 0,
+  );
+  const hasIssue = Boolean(issueType || issueNotes || hasQuantityIssue);
 
-        const nextApprovedQuantity = Math.max(
-          item.quantity,
-          dealerRequestedQuantity,
-        );
+  if (hasIssue) {
+    const inferredIssue =
+      issueType ??
+      (checkedItems.some(({ damagedQuantity }) => damagedQuantity > 0)
+        ? PhysicalCheckIssueType.DAMAGED_PRODUCT
+        : PhysicalCheckIssueType.SHORT_QUANTITY);
 
-        const approvedDifference = nextApprovedQuantity - item.quantity;
+    await prisma.$transaction(async (tx) => {
+      for (const item of checkedItems) {
+        const orderItem = item.item.orderItem;
+        const existingBlocked = orderItem.blockedQuantity;
 
-        if (approvedDifference > 0) {
-          await tx.orderItem.update({
-            where: {
-              id: item.id,
-            },
+        if (existingBlocked > 0) {
+          const updatedProduct = await tx.product.update({
+            where: { id: orderItem.productId },
             data: {
-              requestedQuantity: dealerRequestedQuantity,
-              quantity: nextApprovedQuantity,
+              quantity: { increment: existingBlocked },
+              blocked: { decrement: existingBlocked },
             },
           });
 
-          approvedNow += approvedDifference;
+          await tx.product.update({
+            where: { id: orderItem.productId },
+            data: {
+              status: getProductStatus(
+                updatedProduct.quantity,
+                updatedProduct.minimumStock,
+              ),
+            },
+          });
+
+          await closeStockBlockTimeline({
+            client: tx,
+            orderId: assignment.orderId,
+            orderItemId: orderItem.id,
+            productId: orderItem.productId,
+            quantity: existingBlocked,
+            currentUser,
+            status: "RELEASED",
+            releaseReason: "PHYSICAL_CHECK_BLOCKER",
+            notes: `${existingBlocked} quantity released because the full ordered quantity was not verified.`,
+          });
+
+          await tx.orderItem.update({
+            where: { id: orderItem.id },
+            data: { blockedQuantity: 0 },
+          });
         }
 
-        approvedTotalAfter += nextApprovedQuantity;
-        blockedTotalAfter += item.blockedQuantity;
-        deliveredTotalAfter += item.deliveredQuantity ?? 0;
-        cancelledTotalAfter += item.cancelledQuantity ?? 0;
+        await tx.orderPhysicalAssignmentItem.update({
+          where: { id: item.item.id },
+          data: {
+            verifiedQuantity: item.verifiedQuantity,
+            damagedQuantity: item.damagedQuantity,
+            shortQuantity: item.shortQuantity,
+            notes: item.notes || null,
+            checkedById: currentUser.id,
+            checkedByName: currentUser.name,
+            checkedAt: new Date(),
+          },
+        });
       }
 
-      if (approvedNow <= 0) {
-        throw new Error("NO_SHORT_QUANTITY");
-      }
-
-      const openApprovedQuantity = Math.max(
-        0,
-        approvedTotalAfter - deliveredTotalAfter - cancelledTotalAfter,
-      );
-      const unblockedApprovedQuantity = Math.max(
-        0,
-        openApprovedQuantity - blockedTotalAfter,
-      );
-
-      let nextStatus: OrderStatus = OrderStatus.BACKORDERED;
-
-      if (deliveredTotalAfter > 0 && openApprovedQuantity > 0) {
-        nextStatus = OrderStatus.PARTIALLY_DELIVERED;
-      } else if (blockedTotalAfter > 0 && unblockedApprovedQuantity === 0) {
-        nextStatus = OrderStatus.STOCK_BLOCKED;
-      } else if (blockedTotalAfter > 0 && unblockedApprovedQuantity > 0) {
-        nextStatus = OrderStatus.PARTIALLY_BLOCKED;
-      } else if (order.status === OrderStatus.NEW_ORDER) {
-        nextStatus = OrderStatus.STOCK_CHECKED;
-      }
+      await tx.orderPhysicalAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          status: PhysicalCheckStatus.ISSUE_REPORTED,
+          issueType: inferredIssue,
+          issueNotes:
+            issueNotes ||
+            "Physical verification found a quantity, damage, or availability issue.",
+          completedById: currentUser.id,
+          completedByName: currentUser.name,
+          completedAt: new Date(),
+        },
+      });
 
       await tx.order.update({
-        where: {
-          id: order.id,
-        },
-        data: {
-          status: nextStatus,
-          assignedDriverId: null,
-        },
+        where: { id: assignment.orderId },
+        data: { status: OrderStatus.PHYSICAL_CHECK_ISSUE },
       });
 
       await recordOrderStatusHistory({
         client: tx as unknown as HistoryClient,
-        orderId: order.id,
-        fromStatus: order.status,
-        toStatus: nextStatus,
-        title: "Remaining Quantity Approved",
-        description: `${approvedNow} short quantity moved into approved quantity. It can now be blocked and dispatched in the next cycle.`,
+        orderId: assignment.orderId,
+        fromStatus: assignment.order.status,
+        toStatus: OrderStatus.PHYSICAL_CHECK_ISSUE,
+        title: "Physical Check Issue Reported",
+        description: `${assignment.team.name}: ${issueNotes || inferredIssue.replaceAll("_", " ")}.`,
         currentUser,
       });
-    })
-    .catch((error) => {
-      if (error instanceof Error) {
-        if (error.message === "ORDER_NOT_FOUND") {
-          redirect("/internal/dispatch?error=order-not-found");
-        }
 
-        if (error.message === "INVALID_STATUS") {
-          redirect("/internal/dispatch?error=invalid-status");
-        }
-
-        if (error.message === "NO_SHORT_QUANTITY") {
-          redirect("/internal/dispatch?error=no-short-quantity");
-        }
-
-        if (error.message === "APPROVED_WORK_NOT_FINISHED") {
-          redirect("/internal/dispatch?error=approved-work-not-finished");
-        }
+      if (isQcRework) {
+        await setAutomatedTaskStatus({
+          client: tx,
+          automationKey: workflowTaskKeys.qcRework(assignment.id),
+          status: "BLOCKED",
+          actor: currentUser,
+          message: `${assignment.team.name} reported a blocker during QC rework.`,
+          blockerReason: issueNotes || inferredIssue.replaceAll("_", " "),
+        });
+      } else {
+        await setAutomatedTaskStatus({
+          client: tx,
+          automationKey: workflowTaskKeys.physicalVerification(assignment.id),
+          status: "BLOCKED",
+          actor: currentUser,
+          message: `${assignment.team.name} reported a physical verification blocker.`,
+          blockerReason: issueNotes || inferredIssue.replaceAll("_", " "),
+        });
       }
 
-      throw error;
+      await createWorkflowNotification({
+        client: tx,
+        title: `Physical check blocker: ${assignment.order.orderNumber}`,
+        message: `${assignment.team.name} reported ${inferredIssue.replaceAll("_", " ").toLowerCase()}. Review and resolve before QC.`,
+        module: "DISPATCH",
+        href: "/internal/dispatch",
+        orderId: assignment.orderId,
+        actor: currentUser,
+        recipientRoles: ["owner", "manager"],
+        priority: "BLOCKER",
+      });
+
+      await createWorkflowNotification({
+        client: tx,
+        title: `Order blocked during physical check: ${assignment.order.orderNumber}`,
+        message: `${assignment.team.name} reported ${inferredIssue.replaceAll("_", " ").toLowerCase()}. Track the blocked order in Workflow Control.`,
+        module: "ORDER_RECEIVING",
+        href: "/internal/order-receiving",
+        orderId: assignment.orderId,
+        actor: currentUser,
+        recipientRoles: ["order_team"],
+        priority: "BLOCKER",
+      });
     });
 
-  revalidatePath("/internal/dispatch");
-  revalidatePath("/dealer/orders");
-  revalidatePath("/internal/dashboard");
+    await createSecurityAuditLog({
+      eventType: "PHYSICAL_CHECK_ISSUE_REPORTED",
+      user: currentUser,
+      path: "/internal/dispatch",
+      description: `${assignment.order.orderNumber}: ${assignment.team.name} reported ${inferredIssue}.`,
+    });
 
-  redirect("/internal/dispatch?success=remaining-approved");
-}
+    revalidatePath("/internal/dispatch");
+    revalidatePath("/internal/order-receiving");
+    revalidatePath("/internal/qc");
+    revalidatePath("/dealer/orders");
+    revalidatePath("/internal/dashboard");
+  revalidatePath("/account/tasks");
+  revalidatePath("/internal/tasks");
 
-export async function blockOrderStockAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
-
-  if (!hasAccess || !canHandleInventoryWorkflow(currentUser.role)) {
-    redirect("/internal/dispatch?error=permission-denied");
+    redirect(dispatchUrl("success", "issue-reported"));
   }
 
-  const orderId = String(formData.get("orderId") ?? "");
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const checked of checkedItems) {
+        const orderItem = checked.item.orderItem;
+        const desiredBlocked =
+          orderItem.requestedQuantity > 0
+            ? orderItem.requestedQuantity
+            : orderItem.quantity;
+        const existingBlocked = orderItem.blockedQuantity;
+        const additionalBlock = Math.max(0, desiredBlocked - existingBlocked);
+        const releaseQuantity = Math.max(0, existingBlocked - desiredBlocked);
 
-  if (!orderId) {
-    redirect("/internal/dispatch?error=missing-order");
+        if (additionalBlock > 0) {
+          const updated = await tx.product.updateMany({
+            where: {
+              id: orderItem.productId,
+              quantity: { gte: additionalBlock },
+            },
+            data: {
+              quantity: { decrement: additionalBlock },
+              blocked: { increment: additionalBlock },
+            },
+          });
+
+          if (updated.count !== 1) {
+            throw new Error("PRODUCT_STOCK_CHANGED");
+          }
+
+          const updatedProduct = await tx.product.findUniqueOrThrow({
+            where: { id: orderItem.productId },
+          });
+
+          await tx.product.update({
+            where: { id: orderItem.productId },
+            data: {
+              status: getProductStatus(
+                updatedProduct.quantity,
+                updatedProduct.minimumStock,
+              ),
+            },
+          });
+
+          await recordStockBlockTimeline({
+            client: tx,
+            order: {
+              id: assignment.orderId,
+              orderNumber: assignment.order.orderNumber,
+            },
+            item: {
+              id: orderItem.id,
+              productId: orderItem.productId,
+              orderId: assignment.orderId,
+            },
+            quantity: additionalBlock,
+            currentUser,
+            blockReason: "PHYSICAL_CHECK_VERIFIED",
+            notes: `${assignment.team.name} physically verified and blocked ${additionalBlock} ${orderItem.product.unit}.`,
+          });
+        }
+
+        if (releaseQuantity > 0) {
+          const updatedProduct = await tx.product.update({
+            where: { id: orderItem.productId },
+            data: {
+              quantity: { increment: releaseQuantity },
+              blocked: { decrement: releaseQuantity },
+            },
+          });
+
+          await tx.product.update({
+            where: { id: orderItem.productId },
+            data: {
+              status: getProductStatus(
+                updatedProduct.quantity,
+                updatedProduct.minimumStock,
+              ),
+            },
+          });
+
+          await closeStockBlockTimeline({
+            client: tx,
+            orderId: assignment.orderId,
+            orderItemId: orderItem.id,
+            productId: orderItem.productId,
+            quantity: releaseQuantity,
+            currentUser,
+            status: "RELEASED",
+            releaseReason: "FULL_QUANTITY_RECONCILIATION",
+            notes: `${releaseQuantity} excess legacy blocked quantity released before full verification.`,
+          });
+        }
+
+        await tx.orderItem.update({
+          where: { id: orderItem.id },
+          data: { blockedQuantity: desiredBlocked },
+        });
+
+        await tx.orderPhysicalAssignmentItem.update({
+          where: { id: checked.item.id },
+          data: {
+            verifiedQuantity: desiredBlocked,
+            damagedQuantity: 0,
+            shortQuantity: 0,
+            notes: checked.notes || null,
+            checkedById: currentUser.id,
+            checkedByName: currentUser.name,
+            checkedAt: new Date(),
+          },
+        });
+      }
+
+      await tx.orderPhysicalAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          status: PhysicalCheckStatus.READY_FOR_QC,
+          completedById: currentUser.id,
+          completedByName: currentUser.name,
+          completedAt: new Date(),
+          issueType: null,
+          issueNotes: null,
+          qcNotes: null,
+          revision: { increment: isQcRework ? 1 : 0 },
+        },
+      });
+
+      const remainingAssignments = await tx.orderPhysicalAssignment.findMany({
+        where: { orderId: assignment.orderId },
+        select: { status: true },
+      });
+      const allReady = remainingAssignments.every((row) =>
+        [PhysicalCheckStatus.READY_FOR_QC, PhysicalCheckStatus.COMPLETED].some(
+          (status) => status === row.status,
+        ),
+      );
+      const hasQcRework = remainingAssignments.some(
+        (row) => row.status === PhysicalCheckStatus.QC_REWORK,
+      );
+      const hasIssue = remainingAssignments.some(
+        (row) => row.status === PhysicalCheckStatus.ISSUE_REPORTED,
+      );
+      const nextOrderStatus = allReady
+        ? OrderStatus.PENDING_QC
+        : hasQcRework
+          ? OrderStatus.QC_REWORK
+          : hasIssue
+            ? OrderStatus.PHYSICAL_CHECK_ISSUE
+            : OrderStatus.PHYSICAL_CHECK_IN_PROGRESS;
+
+      await tx.order.update({
+        where: { id: assignment.orderId },
+        data: { status: nextOrderStatus },
+      });
+
+      await recordOrderStatusHistory({
+        client: tx as unknown as HistoryClient,
+        orderId: assignment.orderId,
+        fromStatus: assignment.order.status,
+        toStatus: nextOrderStatus,
+        title: allReady
+          ? "All Physical Checks Completed"
+          : "Physical Team Check Completed",
+        description: allReady
+          ? "All assigned Physical Dispatch Teams completed verification. Order is ready for QC."
+          : `${assignment.team.name} completed verification. Other assigned teams are still working.`,
+        currentUser,
+      });
+
+      if (isQcRework) {
+        await setAutomatedTaskStatus({
+          client: tx,
+          automationKey: workflowTaskKeys.qcRework(assignment.id),
+          status: "DONE",
+          actor: currentUser,
+          message: `${assignment.team.name} completed the requested QC rework.`,
+        });
+      } else {
+        await setAutomatedTaskStatus({
+          client: tx,
+          automationKey: workflowTaskKeys.physicalVerification(assignment.id),
+          status: "DONE",
+          actor: currentUser,
+          message: `${assignment.team.name} completed full physical verification for ${assignment.order.orderNumber}.`,
+        });
+      }
+
+      if (allReady) {
+        await ensureQcReviewTask(tx, {
+          orderId: assignment.orderId,
+          orderNumber: assignment.order.orderNumber,
+          actor: currentUser,
+        });
+        await resumeAutomatedTask({
+          client: tx,
+          automationKey: workflowTaskKeys.qcReview(assignment.orderId),
+          actor: currentUser,
+          message: "All Physical Teams are ready. QC review resumed.",
+          fallbackStatus: "TODO",
+        });
+      }
+
+      await createWorkflowNotification({
+        client: tx,
+        title: allReady
+          ? `QC required: ${assignment.order.orderNumber}`
+          : `Physical check completed: ${assignment.team.name}`,
+        message: allReady
+          ? "All physical teams completed verification. QC can now inspect the order."
+          : `${assignment.team.name} completed its assigned product check.`,
+        module: allReady ? "QC" : "DISPATCH",
+        href: allReady ? "/internal/qc" : "/internal/dispatch",
+        orderId: assignment.orderId,
+        actor: currentUser,
+        recipientRoles: allReady
+          ? ["owner", "manager", "qc_team"]
+          : ["owner", "manager"],
+        priority: allReady ? "HIGH_ALERT" : "NORMAL",
+      });
+
+      if (!allReady) {
+        await createWorkflowNotification({
+          client: tx,
+          title: `Physical check progress: ${assignment.order.orderNumber}`,
+          message: `${assignment.team.name} completed its assigned product check. Other teams are still working.`,
+          module: "ORDER_RECEIVING",
+          href: "/internal/order-receiving",
+          orderId: assignment.orderId,
+          actor: currentUser,
+          recipientRoles: ["order_team"],
+          priority: "NORMAL",
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "PRODUCT_STOCK_CHANGED") {
+      await prisma.$transaction(async (tx) => {
+        for (const assignmentItem of assignment.items) {
+          const orderItem = assignmentItem.orderItem;
+          if (orderItem.blockedQuantity <= 0) continue;
+
+          const updatedProduct = await tx.product.update({
+            where: { id: orderItem.productId },
+            data: {
+              quantity: { increment: orderItem.blockedQuantity },
+              blocked: { decrement: orderItem.blockedQuantity },
+            },
+          });
+
+          await tx.product.update({
+            where: { id: orderItem.productId },
+            data: {
+              status: getProductStatus(
+                updatedProduct.quantity,
+                updatedProduct.minimumStock,
+              ),
+            },
+          });
+
+          await tx.orderItem.update({
+            where: { id: orderItem.id },
+            data: { blockedQuantity: 0 },
+          });
+
+          await closeStockBlockTimeline({
+            client: tx,
+            orderId: assignment.orderId,
+            orderItemId: orderItem.id,
+            productId: orderItem.productId,
+            quantity: orderItem.blockedQuantity,
+            currentUser,
+            status: "RELEASED",
+            releaseReason: "FULL_STOCK_NOT_AVAILABLE",
+            notes: "Incomplete reserved stock released because the complete ordered quantity is unavailable.",
+          });
+        }
+
+        await tx.orderPhysicalAssignmentItem.updateMany({
+          where: { assignmentId: assignment.id },
+          data: {
+            verifiedQuantity: null,
+            damagedQuantity: 0,
+            shortQuantity: 0,
+            checkedById: null,
+            checkedByName: null,
+            checkedAt: null,
+          },
+        });
+
+        await tx.orderPhysicalAssignment.update({
+          where: { id: assignment.id },
+          data: {
+            status: PhysicalCheckStatus.ISSUE_REPORTED,
+            issueType: PhysicalCheckIssueType.PRODUCT_UNAVAILABLE,
+            issueNotes:
+              "Full ordered quantity is not available. Add complete stock, resolve the blocker with a note, and restart physical verification.",
+          },
+        });
+        await tx.order.update({
+          where: { id: assignment.orderId },
+          data: { status: OrderStatus.PHYSICAL_CHECK_ISSUE },
+        });
+
+        await setAutomatedTaskStatus({
+          client: tx,
+          automationKey:
+            isQcRework
+              ? workflowTaskKeys.qcRework(assignment.id)
+              : workflowTaskKeys.physicalVerification(assignment.id),
+          status: "BLOCKED",
+          actor: currentUser,
+          message: "Stock changed before the complete quantity could be reserved.",
+          blockerReason: "Full ordered quantity is no longer available. Add stock and restart verification.",
+        });
+      });
+
+      redirect(dispatchUrl("error", "stock-changed"));
+    }
+
+    throw error;
   }
 
-  const order = await prisma.order.findUnique({
-    where: {
-      id: orderId,
-    },
+  await createSecurityAuditLog({
+    eventType:
+      isQcRework
+        ? "QC_REWORK_COMPLETED"
+        : "PHYSICAL_CHECK_COMPLETED",
+    user: currentUser,
+    path: "/internal/dispatch",
+    description: `${assignment.team.name} completed physical verification for ${assignment.order.orderNumber}.`,
   });
 
-  if (!order) {
-    redirect("/internal/dispatch?error=order-not-found");
+  revalidatePath("/internal/dispatch");
+  revalidatePath("/internal/order-receiving");
+  revalidatePath("/internal/qc");
+  revalidatePath("/internal/inventory");
+  revalidatePath("/dealer/orders");
+  revalidatePath("/internal/dashboard");
+  revalidatePath("/account/tasks");
+  revalidatePath("/internal/tasks");
+
+  redirect(dispatchUrl("success", "check-completed"));
+}
+
+
+export async function resolvePhysicalBlockerAction(formData: FormData) {
+  const currentUser = await assertPhysicalAccess();
+
+  if (!hasAnyRole(currentUser.roles, MANAGER_ROLES)) {
+    redirect(dispatchUrl("error", "permission-denied"));
   }
 
-  if (!isStockBlockAllowed(order.status)) {
-    redirect("/internal/dispatch?error=invalid-status");
-  }
+  const assignmentId = cleanText(formData.get("assignmentId"));
+  const resolutionNote = cleanText(formData.get("resolutionNote"));
 
-  let redirectUrl = "/internal/dispatch?success=stock-blocked";
+  if (!assignmentId) redirect(dispatchUrl("error", "missing-assignment"));
+  if (!resolutionNote) redirect(dispatchUrl("error", "resolution-note-required"));
 
-  await prisma.$transaction(async (tx) => {
-    const freshOrder = await tx.order.findUnique({
-      where: {
-        id: order.id,
-      },
-      include: {
-        items: {
-          include: {
-            product: true,
+  const assignment = await prisma.orderPhysicalAssignment.findUnique({
+    where: { id: assignmentId },
+    include: {
+      team: {
+        include: {
+          members: {
+            where: { user: { status: "ACTIVE" } },
+            select: { userId: true },
           },
         },
       },
-    });
+      order: true,
+      items: {
+        include: {
+          orderItem: { include: { product: true } },
+        },
+      },
+    },
+  });
 
-    if (!freshOrder) {
-      throw new Error("ORDER_NOT_FOUND");
-    }
+  if (!assignment) redirect(dispatchUrl("error", "assignment-not-found"));
+  if (assignment.status !== PhysicalCheckStatus.ISSUE_REPORTED) {
+    redirect(dispatchUrl("error", "invalid-assignment-status"));
+  }
 
-    let totalBlockedNow = 0;
-    let totalRequested = 0;
-    let totalBlockedAfter = 0;
-    let totalDelivered = 0;
-    let totalCancelled = 0;
+  const insufficientItem = assignment.items.find((item) => {
+    const orderedQuantity =
+      item.orderItem.requestedQuantity > 0
+        ? item.orderItem.requestedQuantity
+        : item.orderItem.quantity;
+    const completeAvailableQuantity =
+      item.orderItem.product.quantity + item.orderItem.blockedQuantity;
+    return completeAvailableQuantity < orderedQuantity;
+  });
 
-    for (const item of freshOrder.items) {
-      const deliveredQuantity = item.deliveredQuantity ?? 0;
-      const cancelledQuantity = item.cancelledQuantity ?? 0;
-      const requiredQuantity =
-        item.quantity -
-        deliveredQuantity -
-        cancelledQuantity -
-        item.blockedQuantity;
-      const blockQuantity = Math.min(
-        Math.max(0, requiredQuantity),
-        item.product.quantity,
-      );
+  if (insufficientItem) {
+    redirect(dispatchUrl("error", "full-stock-required"));
+  }
 
-      totalRequested += item.quantity;
-      totalDelivered += deliveredQuantity;
-      totalCancelled += cancelledQuantity;
+  await prisma.$transaction(async (tx) => {
+    // Legacy issue records may still hold an incomplete reservation. Release it
+    // before restarting verification so the next check always begins from
+    // one complete, unambiguous stock quantity.
+    for (const assignmentItem of assignment.items) {
+      const blockedQuantity = assignmentItem.orderItem.blockedQuantity;
+      if (blockedQuantity <= 0) continue;
 
-      if (blockQuantity <= 0) {
-        totalBlockedAfter += item.blockedQuantity;
-        continue;
-      }
-
-      const nextQuantity = item.product.quantity - blockQuantity;
-      const nextBlocked = item.product.blocked + blockQuantity;
+      const product = assignmentItem.orderItem.product;
+      const nextQuantity = product.quantity + blockedQuantity;
+      const nextBlocked = Math.max(0, product.blocked - blockedQuantity);
 
       await tx.product.update({
-        where: {
-          id: item.product.id,
-        },
+        where: { id: product.id },
         data: {
           quantity: nextQuantity,
           blocked: nextBlocked,
-          status: getProductStatus(nextQuantity, item.product.minimumStock),
+          status: getProductStatus(nextQuantity, product.minimumStock),
         },
       });
 
       await tx.orderItem.update({
-        where: {
-          id: item.id,
-        },
-        data: {
-          blockedQuantity: item.blockedQuantity + blockQuantity,
-        },
+        where: { id: assignmentItem.orderItemId },
+        data: { blockedQuantity: 0 },
       });
 
-      await recordStockBlockTimeline({
+      await closeStockBlockTimeline({
         client: tx,
-        order: freshOrder,
-        item,
-        quantity: blockQuantity,
+        orderId: assignment.orderId,
+        orderItemId: assignmentItem.orderItemId,
+        productId: product.id,
+        quantity: blockedQuantity,
         currentUser,
-        blockReason: "ORDER_STOCK_BLOCKED",
-        notes: `${blockQuantity} quantity of ${item.product.name} blocked for ${freshOrder.orderNumber}.`,
+        status: "RELEASED",
+        releaseReason: "MANUAL_RELEASE",
+        notes: `Released ${blockedQuantity} legacy incomplete reservation before full verification restart.`,
       });
-
-      totalBlockedNow += blockQuantity;
-      totalBlockedAfter += item.blockedQuantity + blockQuantity;
     }
 
-    const openQuantity = Math.max(
-      0,
-      totalRequested - totalDelivered - totalCancelled,
-    );
-    const remainingUnblocked = Math.max(0, openQuantity - totalBlockedAfter);
+    await tx.orderPhysicalAssignmentItem.updateMany({
+      where: { assignmentId: assignment.id },
+      data: {
+        verifiedQuantity: null,
+        damagedQuantity: 0,
+        shortQuantity: 0,
+        notes: null,
+        checkedById: null,
+        checkedByName: null,
+        checkedAt: null,
+      },
+    });
 
-    let nextStatus: OrderStatus = OrderStatus.STOCK_BLOCKED;
-    let historyTitle = "Stock Blocked";
-    let successKey = "stock-blocked";
+    await tx.orderPhysicalAssignment.update({
+      where: { id: assignment.id },
+      data: {
+        status: PhysicalCheckStatus.ASSIGNED,
+        startedById: null,
+        startedByName: null,
+        startedAt: null,
+        completedById: null,
+        completedByName: null,
+        completedAt: null,
+        issueType: null,
+        issueNotes: null,
+      },
+    });
 
-    if (totalBlockedAfter <= 0) {
-      nextStatus = OrderStatus.BACKORDERED;
-      historyTitle = "Order Backordered";
-      successKey = "backordered";
-    } else if (remainingUnblocked > 0) {
-      nextStatus = OrderStatus.PARTIALLY_BLOCKED;
-      historyTitle = "Stock Partially Blocked";
-      successKey = "partial-stock-blocked";
-    }
+    const otherAssignments = await tx.orderPhysicalAssignment.findMany({
+      where: { orderId: assignment.orderId, id: { not: assignment.id } },
+      select: { status: true },
+    });
+    const nextStatus = otherAssignments.some(
+      (row) => row.status === PhysicalCheckStatus.ISSUE_REPORTED,
+    )
+      ? OrderStatus.PHYSICAL_CHECK_ISSUE
+      : OrderStatus.PHYSICAL_CHECK_ASSIGNED;
 
     await tx.order.update({
-      where: {
-        id: freshOrder.id,
-      },
-      data: {
-        status: nextStatus,
-      },
+      where: { id: assignment.orderId },
+      data: { status: nextStatus },
     });
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
-      orderId: freshOrder.id,
-      fromStatus: freshOrder.status,
+      orderId: assignment.orderId,
+      fromStatus: assignment.order.status,
       toStatus: nextStatus,
-      title: historyTitle,
-      description:
-        totalBlockedNow > 0
-          ? `${totalBlockedNow} quantity blocked now. ${remainingUnblocked} quantity still pending.`
-          : `No stock was available to block. ${remainingUnblocked} quantity is pending/backordered.`,
+      title: "Stock Blocker Resolved",
+      description: `${assignment.team.name}: ${resolutionNote}. Full physical verification must restart before QC.`,
       currentUser,
     });
 
-    redirectUrl = `/internal/dispatch?success=${successKey}`;
-  });
+    if (assignment.revision > 0 || assignment.qcRejectedAt) {
+      await resumeAutomatedTask({
+        client: tx,
+        automationKey: workflowTaskKeys.qcRework(assignment.id),
+        actor: currentUser,
+        message: `${currentUser.name} resolved the rework blocker: ${resolutionNote}`,
+        fallbackStatus: "TODO",
+      });
+    } else {
+      await resumeAutomatedTask({
+        client: tx,
+        automationKey: workflowTaskKeys.physicalVerification(assignment.id),
+        actor: currentUser,
+        message: `${currentUser.name} resolved the stock blocker: ${resolutionNote}`,
+        fallbackStatus: "TODO",
+      });
+    }
 
-  revalidatePath("/internal/dispatch");
-  revalidatePath("/internal/inventory");
-  revalidatePath("/dealer/orders");
-  revalidatePath("/dealer/place-order");
-  revalidatePath("/internal/dashboard");
-
-  redirect(redirectUrl);
-}
-
-export async function markReadyForDispatchAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
-
-  if (!hasAccess || !canHandleDispatchWorkflow(currentUser.role)) {
-    redirect("/internal/dispatch?error=permission-denied");
-  }
-
-  const orderId = String(formData.get("orderId") ?? "");
-
-  if (!orderId) {
-    redirect("/internal/dispatch?error=missing-order");
-  }
-
-  const order = await prisma.order.findUnique({
-    where: {
-      id: orderId,
-    },
-    include: {
-      items: true,
-    },
-  });
-
-  if (!order) {
-    redirect("/internal/dispatch?error=order-not-found");
-  }
-
-  if (!isReadyForDispatchAllowed(order.status)) {
-    redirect("/internal/dispatch?error=invalid-status");
-  }
-
-  const blockedQuantity = order.items.reduce(
-    (total, item) => total + item.blockedQuantity,
-    0,
-  );
-
-  if (blockedQuantity <= 0) {
-    redirect("/internal/dispatch?error=nothing-to-dispatch");
-  }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: {
-        id: order.id,
-      },
-      data: {
-        status: OrderStatus.READY_FOR_DISPATCH,
-      },
-    });
-
-    await recordOrderStatusHistory({
-      client: tx as unknown as HistoryClient,
-      orderId: order.id,
-      fromStatus: order.status,
-      toStatus: OrderStatus.READY_FOR_DISPATCH,
-      title: "Ready for Dispatch",
-      description: `${blockedQuantity} blocked quantity is ready for QC approval and dispatch.`,
-      currentUser,
-    });
-  });
-
-  revalidatePath("/internal/dispatch");
-  revalidatePath("/internal/qc");
-  revalidatePath("/dealer/orders");
-  revalidatePath("/internal/dashboard");
-
-  redirect("/internal/dispatch?success=ready-for-dispatch");
-}
-
-export async function assignDriverAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
-
-  if (!hasAccess || !canHandleDispatchWorkflow(currentUser.role)) {
-    redirect("/internal/dispatch?error=permission-denied");
-  }
-
-  const orderId = String(formData.get("orderId") ?? "");
-  const driverId = String(formData.get("driverId") ?? "");
-  const transportOptionId = String(formData.get("transportOptionId") ?? "");
-
-  if (!orderId) {
-    redirect("/internal/dispatch?error=missing-order");
-  }
-
-  if (!driverId) {
-    redirect("/internal/dispatch?error=missing-driver");
-  }
-
-  if (!transportOptionId) {
-    redirect("/internal/dispatch?error=missing-transport");
-  }
-
-  const order = await prisma.order.findUnique({
-    where: {
-      id: orderId,
-    },
-  });
-
-  if (!order) {
-    redirect("/internal/dispatch?error=order-not-found");
-  }
-
-  if (order.status !== OrderStatus.QC_APPROVED) {
-    redirect("/internal/dispatch?error=invalid-status");
-  }
-
-  const driver = await prisma.user.findFirst({
-    where: {
-      id: driverId,
-      role: UserRole.DRIVER_TRANSPORT,
-      status: UserStatus.ACTIVE,
-    },
-  });
-
-  if (!driver) {
-    redirect("/internal/dispatch?error=driver-not-found");
-  }
-
-  const transportOptions = await prisma.$queryRaw<
-    { id: string; name: string; isActive: boolean }[]
-  >`
-    SELECT "id", "name", "isActive"
-    FROM "TransportOption"
-    WHERE "id" = ${transportOptionId}
-    LIMIT 1
-  `;
-
-  const transportOption = transportOptions[0];
-
-  if (!transportOption || !transportOption.isActive) {
-    redirect("/internal/dispatch?error=transport-not-found");
-  }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      UPDATE "Order"
-      SET
-        "assignedDriverId" = ${driver.id},
-        "transportOptionId" = ${transportOption.id},
-        "transportLabel" = ${transportOption.name},
-        "signedInvoiceStatus" = 'NOT_UPLOADED',
-        "signedInvoiceUploadedAt" = NULL,
-        "status" = ${OrderStatus.TRANSPORT_ASSIGNED}::"OrderStatus",
-        "updatedAt" = CURRENT_TIMESTAMP
-      WHERE "id" = ${order.id}
-    `;
-
-    await recordOrderStatusHistory({
-      client: tx as unknown as HistoryClient,
-      orderId: order.id,
-      fromStatus: order.status,
-      toStatus: OrderStatus.TRANSPORT_ASSIGNED,
-      title: "Transport Assigned",
-      description: `${driver.name} assigned for delivery via ${transportOption.name}.`,
-      currentUser,
+    await createWorkflowNotification({
+      client: tx,
+      title: `Physical verification restart: ${assignment.order.orderNumber}`,
+      message: "Full stock is available. Restart the complete physical verification for every assigned item.",
+      module: "DISPATCH",
+      href: "/internal/dispatch",
+      orderId: assignment.orderId,
+      actor: currentUser,
+      recipientUserIds: assignment.team.members.map((member) => member.userId),
+      priority: "HIGH_ALERT",
     });
   });
 
   await createSecurityAuditLog({
-    eventType: "TRANSPORT_ASSIGNED",
+    eventType: "PHYSICAL_CHECK_COMPLETED",
     user: currentUser,
     path: "/internal/dispatch",
-    description: `${order.orderNumber} assigned to ${driver.name} via ${transportOption.name}.`,
+    description: `${assignment.order.orderNumber}: ${resolutionNote}`,
   });
 
   revalidatePath("/internal/dispatch");
+  revalidatePath("/internal/order-receiving");
+  revalidatePath("/internal/qc");
   revalidatePath("/dealer/orders");
-  revalidatePath("/field/deliveries");
   revalidatePath("/internal/dashboard");
+  revalidatePath("/account/tasks");
+  revalidatePath("/internal/tasks");
 
-  redirect("/internal/dispatch?success=driver-assigned");
+  redirect(dispatchUrl("success", "blocker-resolved"));
 }
 
 export async function approveCancellationRequestAction(formData: FormData) {
-  const { currentUser, hasAccess } = await checkPermission("manage_dispatch");
+  const currentUser = await assertPhysicalAccess();
 
-  if (!hasAccess || !canHandleDispatchWorkflow(currentUser.role)) {
-    redirect("/internal/dispatch?error=permission-denied");
+  if (!hasAnyRole(currentUser.roles, MANAGER_ROLES)) {
+    redirect(dispatchUrl("error", "permission-denied"));
   }
 
-  const orderId = String(formData.get("orderId") ?? "");
+  const orderId = cleanText(formData.get("orderId"));
+  const approvalNote = cleanText(formData.get("approvalNote"));
 
-  if (!orderId) {
-    redirect("/internal/dispatch?error=missing-order");
+  if (!orderId) redirect(dispatchUrl("error", "missing-order"));
+  if (approvalNote.length > 1000) {
+    redirect(dispatchUrl("error", "cancellation-approval-note-too-long"));
   }
 
-  const order = await prisma.order.findUnique({
-    where: {
-      id: orderId,
-    },
-    include: {
-      items: {
-        include: {
-          product: true,
-        },
-      },
-    },
-  });
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM public."Order" WHERE "id" = ${orderId} FOR UPDATE
+    `;
 
-  if (!order) {
-    redirect("/internal/dispatch?error=order-not-found");
-  }
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: { items: { include: { product: true } } },
+    });
 
-  if (order.status !== CANCELLATION_REQUESTED_STATUS) {
-    redirect("/internal/dispatch?error=invalid-status");
-  }
+    if (!order) return { error: "order-not-found" as const };
+    if (order.status !== CANCELLATION_REQUESTED_STATUS) {
+      return { error: "invalid-status" as const };
+    }
 
-  let nextStatus: OrderStatus = OrderStatus.CANCELLED;
-  let releasedQuantity = 0;
-  let deliveredTotal = 0;
-  let cancelledRemainingQuantity = 0;
+    let releasedQuantity = 0;
+    let cancelledRemainingQuantity = 0;
 
-  await prisma.$transaction(async (tx) => {
     for (const item of order.items) {
       const closure = getCancellationClosureQuantities(item);
       const blockedQuantity = item.blockedQuantity;
-
-      // Important: delivered/consumed quantity must never be cancelled or released.
-      // Cancellation after partial delivery only closes the remaining dealer-requested quantity.
-      deliveredTotal += closure.delivered;
       cancelledRemainingQuantity += closure.cancelled;
       releasedQuantity += blockedQuantity;
 
       if (blockedQuantity > 0) {
-        const nextAvailableQuantity = item.product.quantity + blockedQuantity;
-        const nextBlockedStock = Math.max(
-          0,
-          item.product.blocked - blockedQuantity,
-        );
-
-        await tx.product.update({
-          where: {
-            id: item.productId,
-          },
+        const released = await tx.product.updateMany({
+          where: { id: item.productId, blocked: { gte: blockedQuantity } },
           data: {
-            quantity: nextAvailableQuantity,
-            blocked: nextBlockedStock,
+            quantity: { increment: blockedQuantity },
+            blocked: { decrement: blockedQuantity },
+          },
+        });
+        if (released.count !== 1) {
+          throw new Error(`Stock release integrity failed for ${item.product.code}.`);
+        }
+
+        const updatedProduct = await tx.product.findUniqueOrThrow({
+          where: { id: item.productId },
+        });
+        await tx.product.update({
+          where: { id: item.productId },
+          data: {
             status: getProductStatus(
-              nextAvailableQuantity,
+              updatedProduct.quantity,
               item.product.minimumStock,
             ),
           },
@@ -977,14 +1050,12 @@ export async function approveCancellationRequestAction(formData: FormData) {
           currentUser,
           status: "RELEASED",
           releaseReason: "CANCELLATION_APPROVED",
-          notes: `${blockedQuantity} blocked quantity released after cancellation approval. Delivered quantity, if any, stays consumed.`,
+          notes: `${blockedQuantity} reserved quantity released after cancellation approval.`,
         });
       }
 
       await tx.orderItem.update({
-        where: {
-          id: item.id,
-        },
+        where: { id: item.id },
         data: {
           requestedQuantity: closure.requested,
           quantity: closure.workingQuantity,
@@ -994,43 +1065,170 @@ export async function approveCancellationRequestAction(formData: FormData) {
       });
     }
 
-    nextStatus =
-      deliveredTotal > 0
-        ? OrderStatus.PARTIALLY_CANCELLED
-        : OrderStatus.CANCELLED;
-
     await tx.order.update({
-      where: {
-        id: order.id,
-      },
+      where: { id: order.id },
       data: {
-        status: nextStatus,
+        status: OrderStatus.CANCELLED,
         assignedDriverId: null,
+        transportOptionId: null,
+        transportLabel: null,
+        cancellationDecidedAt: new Date(),
+        cancellationDecidedById: currentUser.id,
+        cancellationDecidedByName: currentUser.name,
+        cancellationDecisionReason:
+          approvalNote || "Cancellation approved by management.",
       },
+    });
+
+    await tx.orderPhysicalAssignment.updateMany({
+      where: { orderId: order.id },
+      data: { status: PhysicalCheckStatus.CANCELLED },
     });
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
       orderId: order.id,
       fromStatus: order.status,
-      toStatus: nextStatus,
-      title:
-        nextStatus === OrderStatus.PARTIALLY_CANCELLED
-          ? "Remaining Quantity Cancelled"
-          : "Cancellation Approved",
-      description:
-        nextStatus === OrderStatus.PARTIALLY_CANCELLED
-          ? `${deliveredTotal} quantity was already delivered and stays consumed. ${cancelledRemainingQuantity} remaining quantity was cancelled/closed. ${releasedQuantity} blocked quantity released back to inventory.`
-          : `${cancelledRemainingQuantity} quantity cancelled. ${releasedQuantity} blocked quantity released back to inventory.`,
+      toStatus: OrderStatus.CANCELLED,
+      title: "Cancellation Approved",
+      description: `${cancelledRemainingQuantity} ordered quantity cancelled. ${releasedQuantity} reserved quantity released.${approvalNote ? ` Note: ${approvalNote}` : ""}`,
       currentUser,
     });
+
+    await cancelAutomatedTasksForOrder({
+      client: tx,
+      orderId: order.id,
+      actor: currentUser,
+      message: `${currentUser.name} approved cancellation for ${order.orderNumber}.`,
+    });
+
+    await createWorkflowNotification({
+      client: tx,
+      title: "Cancellation approved",
+      message: `${order.orderNumber} cancellation was approved by ${currentUser.name}.`,
+      module: "ORDERS",
+      href: `/dealer/orders?selected=${order.id}`,
+      orderId: order.id,
+      actor: currentUser,
+      recipientUserIds: [order.dealerId],
+      priority: "HIGH",
+    });
+
+    return { error: null };
   });
 
+  if (result.error) redirect(dispatchUrl("error", result.error));
+
   revalidatePath("/internal/dispatch");
+  revalidatePath("/internal/qc");
   revalidatePath("/internal/inventory");
   revalidatePath("/dealer/orders");
   revalidatePath("/field/deliveries");
   revalidatePath("/internal/dashboard");
+  revalidatePath("/account/tasks");
+  revalidatePath("/internal/tasks");
+  redirect(dispatchUrl("success", "cancellation-approved"));
+}
 
-  redirect("/internal/dispatch?success=cancellation-approved");
+export async function rejectCancellationRequestAction(formData: FormData) {
+  const currentUser = await assertPhysicalAccess();
+
+  if (!hasAnyRole(currentUser.roles, MANAGER_ROLES)) {
+    redirect(dispatchUrl("error", "permission-denied"));
+  }
+
+  const orderId = cleanText(formData.get("orderId"));
+  const rejectionReason = cleanText(formData.get("rejectionReason"));
+
+  if (!orderId) redirect(dispatchUrl("error", "missing-order"));
+  if (!rejectionReason || rejectionReason.length > 1000) {
+    redirect(dispatchUrl("error", "cancellation-rejection-reason-required"));
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM public."Order" WHERE "id" = ${orderId} FOR UPDATE
+    `;
+
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        dealerId: true,
+        status: true,
+        cancellationPreviousStatus: true,
+      },
+    });
+
+    if (!order) return { error: "order-not-found" as const };
+    if (order.status !== CANCELLATION_REQUESTED_STATUS) {
+      return { error: "invalid-status" as const };
+    }
+
+    const previousStatus = order.cancellationPreviousStatus;
+    const invalidRestoreStatuses: OrderStatus[] = [
+      OrderStatus.CANCELLATION_REQUESTED,
+      OrderStatus.CANCELLED,
+      OrderStatus.DELIVERED,
+      OrderStatus.INVOICE_UPLOADED,
+    ];
+
+    if (!previousStatus || invalidRestoreStatuses.includes(previousStatus)) {
+      return { error: "cancellation-previous-status-missing" as const };
+    }
+
+    await tx.order.update({
+      where: { id: order.id },
+      data: {
+        status: previousStatus,
+        cancellationDecidedAt: new Date(),
+        cancellationDecidedById: currentUser.id,
+        cancellationDecidedByName: currentUser.name,
+        cancellationDecisionReason: rejectionReason,
+      },
+    });
+
+    await recordOrderStatusHistory({
+      client: tx as unknown as HistoryClient,
+      orderId: order.id,
+      fromStatus: CANCELLATION_REQUESTED_STATUS,
+      toStatus: previousStatus,
+      title: "Cancellation Rejected",
+      description: `${currentUser.name} rejected the cancellation request. Reason: ${rejectionReason}`,
+      currentUser,
+    });
+
+    await resumeAutomatedTasksForOrder({
+      client: tx,
+      orderId: order.id,
+      actor: currentUser,
+      message: `${currentUser.name} rejected cancellation and restored ${previousStatus.replaceAll("_", " ").toLowerCase()}.`,
+    });
+
+    await createWorkflowNotification({
+      client: tx,
+      title: "Cancellation request rejected",
+      message: `${order.orderNumber} cancellation request was rejected. Reason: ${rejectionReason}`,
+      module: "ORDERS",
+      href: `/dealer/orders?selected=${order.id}`,
+      orderId: order.id,
+      actor: currentUser,
+      recipientUserIds: [order.dealerId],
+      priority: "HIGH",
+    });
+
+    return { error: null };
+  });
+
+  if (result.error) redirect(dispatchUrl("error", result.error));
+
+  revalidatePath("/internal/dispatch");
+  revalidatePath("/internal/qc");
+  revalidatePath("/internal/order-receiving");
+  revalidatePath("/dealer/orders");
+  revalidatePath("/internal/dashboard");
+  revalidatePath("/account/tasks");
+  revalidatePath("/internal/tasks");
+  redirect(dispatchUrl("success", "cancellation-rejected"));
 }

@@ -3,13 +3,13 @@ import { cookies } from "next/headers";
 import { prisma } from "./db";
 import {
   FORCE_PASSWORD_CHANGE_COOKIE_NAME,
-  OLD_MOCK_COOKIE_NAME,
+  LEGACY_USER_COOKIE_NAME,
   SESSION_COOKIE_NAME,
 } from "./session-constants";
 
 export {
   FORCE_PASSWORD_CHANGE_COOKIE_NAME,
-  OLD_MOCK_COOKIE_NAME,
+  LEGACY_USER_COOKIE_NAME,
   SESSION_COOKIE_NAME,
 } from "./session-constants";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
@@ -41,7 +41,7 @@ export async function createAuthSession(userId: string) {
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
 
-  cookieStore.delete(OLD_MOCK_COOKIE_NAME);
+  cookieStore.delete(LEGACY_USER_COOKIE_NAME);
 }
 
 export async function setForcePasswordChangeCookie() {
@@ -71,9 +71,7 @@ export async function getCurrentSession() {
     where: {
       tokenHash: hashSessionToken(rawToken),
     },
-    include: {
-      user: true,
-    },
+    include: { user: { include: { roleAssignments: true } } },
   });
 
   if (
@@ -101,7 +99,7 @@ export async function deleteCurrentAuthSession() {
 
   cookieStore.delete(SESSION_COOKIE_NAME);
   cookieStore.delete(FORCE_PASSWORD_CHANGE_COOKIE_NAME);
-  cookieStore.delete(OLD_MOCK_COOKIE_NAME);
+  cookieStore.delete(LEGACY_USER_COOKIE_NAME);
 }
 
 export async function deleteUserSessions(userId: string) {

@@ -17,7 +17,7 @@ export async function clearOldSecurityLogsAction() {
   }
 
   await prisma.$executeRaw`
-    DELETE FROM "SecurityAuditLog"
+    DELETE FROM public."SecurityAuditLog"
     WHERE "createdAt" < NOW() - INTERVAL '30 days'
   `;
 
@@ -44,7 +44,7 @@ export async function clearAllSecurityLogsAction() {
   }
 
   await prisma.$executeRaw`
-    DELETE FROM "SecurityAuditLog"
+    DELETE FROM public."SecurityAuditLog"
   `;
 
   await createSecurityAuditLog({

@@ -1,9 +1,12 @@
 import Link from "next/link";
-import Image from "next/image";
 import { AccessDeniedCard } from "@/components/access-denied-card";
 import { OfficeAttendanceCapture } from "@/components/office-attendance-capture";
 import { OfficeAttendanceLiveSummary } from "@/components/office-attendance-live-summary";
-import { getCurrentUser } from "@/lib/current-user";
+import {
+  getCurrentUser,
+  getPortalLandingLabel,
+  getPortalLandingPath,
+} from "@/lib/current-user";
 import {
   canUseOfficeAttendance,
   formatIndiaDateTime,
@@ -22,7 +25,7 @@ function getMessage(error?: string, success?: string, distance?: string) {
   }
 
   if (success === "punched-out") {
-    return { type: "success", text: "Logging Out / Punch Out saved successfully with server time and GPS proof." };
+    return { type: "success", text: "Punch Out saved successfully with server time and GPS proof." };
   }
 
   if (success === "lunch-started") {
@@ -66,10 +69,6 @@ function getMessage(error?: string, success?: string, distance?: string) {
     return { type: "error", text: "Live GPS location is required for attendance." };
   }
 
-  if (error === "invalid-location") {
-    return { type: "error", text: "The browser returned invalid GPS coordinates. Please try again." };
-  }
-
   if (error === "photo-required") {
     return { type: "error", text: "Live camera photo is required for attendance." };
   }
@@ -109,10 +108,10 @@ function getStatusLabel(attendance: Awaited<ReturnType<typeof getTodayAttendance
 }
 
 function getStatusClass(label: string) {
-  if (label === "Completed") return "bg-emerald-300/10 text-emerald-300";
-  if (label.startsWith("On ")) return "bg-yellow-300/10 text-yellow-300";
-  if (label === "Punched In") return "bg-cyan-300/10 text-cyan-300";
-  return "bg-slate-500/10 text-slate-400";
+  if (label === "Completed") return "bg-emerald-50 text-emerald-700";
+  if (label.startsWith("On ")) return "bg-amber-50 text-yellow-300";
+  if (label === "Punched In") return "bg-blue-50 text-blue-600";
+  return "bg-slate-500/10 text-slate-500";
 }
 
 export default async function AccountAttendancePage({
@@ -128,16 +127,19 @@ export default async function AccountAttendancePage({
   const params = await searchParams;
   const message = getMessage(params?.error, params?.success, params?.distance);
 
-  if (!canUseOfficeAttendance(currentUser.role)) {
+  if (!currentUser.roles.some((role) => canUseOfficeAttendance(role))) {
     return (
       <AccessDeniedCard
         title="Attendance Not Available"
         description="Office attendance is only available for company team members. Dealer accounts do not need office punch in/out."
-        backHref="/dealer/dashboard"
-        backLabel="Go to Dealer Dashboard"
+        backHref={getPortalLandingPath(currentUser.role)}
+        backLabel={getPortalLandingLabel(currentUser.role)}
       />
     );
   }
+
+  const portalBackHref = getPortalLandingPath(currentUser.role);
+  const portalBackLabel = getPortalLandingLabel(currentUser.role);
 
   const office = await getActiveOfficeLocation();
   const attendance = await getTodayAttendanceForUser(currentUser.id);
@@ -150,36 +152,59 @@ export default async function AccountAttendancePage({
     : null;
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-8 text-white sm:px-6 lg:px-10">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-7">
-          <p className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-300">
+    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 sm:px-6 lg:px-10">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7">
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-600">
             Office Attendance
           </p>
 
-          <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div className="mt-3 flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
             <div>
-              <h1 className="text-3xl font-black sm:text-5xl">Punch, Breaks & Logout</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-                Punch In requires live photo and GPS. Breaks and logout use server time plus office GPS verification.
-              </p>
+              <h1 className="text-3xl font-black sm:text-5xl">Attendance</h1>
             </div>
 
-            <Link
-              href="/internal/dashboard"
-              className="inline-flex h-12 items-center justify-center rounded-2xl border border-white/10 px-5 text-sm font-bold text-slate-200 transition hover:bg-white/[0.04]"
-            >
-              Back to Dashboard
-            </Link>
+            <nav className="flex flex-wrap gap-2.5 xl:justify-end">
+              <Link
+                href="/account/attendance/leave"
+                className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                Leave Apply
+              </Link>
+              <Link
+                href="/account/attendance/corrections"
+                className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                Correction Request
+              </Link>
+              <Link
+                href="/account/attendance/payslips"
+                className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                My Payslips
+              </Link>
+              <Link
+                href="/account/attendance/advance"
+                className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                Advance Pay
+              </Link>
+              <Link
+                href={portalBackHref}
+                className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl bg-slate-950 px-5 text-sm font-black text-white transition hover:bg-slate-800"
+              >
+                {portalBackLabel}
+              </Link>
+            </nav>
           </div>
         </section>
 
         {message ? (
           <div
-            className={`rounded-3xl border p-5 text-sm font-semibold ${
+            className={`rounded-2xl border p-5 text-sm font-semibold ${
               message.type === "success"
-                ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-                : "border-red-300/20 bg-red-300/10 text-red-100"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-red-200 bg-red-50 text-red-100"
             }`}
           >
             {message.text}
@@ -187,16 +212,16 @@ export default async function AccountAttendancePage({
         ) : null}
 
         {!hasOffice ? (
-          <div className="rounded-3xl border border-yellow-300/20 bg-yellow-300/10 p-5 text-yellow-100">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
             <h2 className="font-bold">Office location is not configured</h2>
-            <p className="mt-2 text-sm leading-6 text-yellow-100/80">
+            <p className="mt-2 text-sm leading-6 text-amber-800/80">
               Owner must set office GPS location and allowed radius before team attendance can start.
             </p>
           </div>
         ) : null}
 
         <section className="grid gap-4 lg:grid-cols-4">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 lg:col-span-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-4">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Today Status</p>
             <span className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusClass(statusLabel)}`}>
               {statusLabel}
@@ -204,15 +229,14 @@ export default async function AccountAttendancePage({
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="text-xs text-slate-500">Punch In</p>
-                <p className="mt-1 font-bold text-slate-200">{formatIndiaDateTime(attendance?.punchInAt)}</p>
+                <p className="mt-1 font-bold text-slate-700">{formatIndiaDateTime(attendance?.punchInAt)}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Logging Out / Punch Out</p>
-                <p className="mt-1 font-bold text-slate-200">{formatIndiaDateTime(attendance?.punchOutAt)}</p>
+                <p className="text-xs text-slate-500">Punch Out</p>
+                <p className="mt-1 font-bold text-slate-700">{formatIndiaDateTime(attendance?.punchOutAt)}</p>
               </div>
             </div>
           </div>
-
         </section>
 
         <OfficeAttendanceLiveSummary
@@ -226,20 +250,20 @@ export default async function AccountAttendancePage({
         />
 
         {office ? (
-          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5">
             <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Office</p>
-                <p className="mt-2 font-bold text-white">{office.name}</p>
-                <p className="mt-1 text-sm text-slate-400">{office.address || "No address added"}</p>
+                <p className="mt-2 font-bold text-slate-950">{office.name}</p>
+                <p className="mt-1 text-sm text-slate-500">{office.address || "No address added"}</p>
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Allowed Radius</p>
-                <p className="mt-2 font-bold text-cyan-300">{office.radiusMeters}m</p>
+                <p className="mt-2 font-bold text-blue-600">{office.radiusMeters}m</p>
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">GPS Rule</p>
-                <p className="mt-2 text-sm leading-6 text-slate-400">Only office area punch, break, and logout actions are accepted.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">Only office area punch, break, and logout actions are accepted.</p>
               </div>
             </div>
           </section>
@@ -251,22 +275,21 @@ export default async function AccountAttendancePage({
           helperText={currentBreakText || undefined}
         />
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
               <h2 className="text-xl font-bold">Today Timeline</h2>
-              <p className="mt-1 text-sm text-slate-500">Punch In, lunch, tea, small break and logging out history.</p>
             </div>
           </div>
 
           <div className="mt-5 grid gap-3">
             {events.map((event) => (
-              <article key={event.id} className="rounded-2xl border border-white/10 bg-slate-900 p-4">
+              <article key={event.id} className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
-                    <p className="font-bold text-white">{getAttendanceActionLabel(event.eventType)}</p>
+                    <p className="font-bold text-slate-950">{getAttendanceActionLabel(event.eventType)}</p>
                     <p className="mt-1 text-xs text-slate-500">{formatIndiaTime(event.createdAt)}</p>
-                    <p className="mt-2 text-sm text-slate-400">{event.note || "-"}</p>
+                    <p className="mt-2 text-sm text-slate-500">{event.note || "-"}</p>
                     <p className="mt-1 text-xs text-slate-500">
                       {event.distanceMeters !== null && event.distanceMeters !== undefined
                         ? `${Math.round(event.distanceMeters)}m from office`
@@ -275,13 +298,11 @@ export default async function AccountAttendancePage({
                   </div>
 
                   {event.photoDataUrl ? (
-                    <Image
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
                       src={event.photoDataUrl}
                       alt={event.label}
-                      width={112}
-                      height={80}
-                      unoptimized
-                      className="h-20 w-28 rounded-2xl border border-white/10 object-cover"
+                      className="h-20 w-28 rounded-2xl border border-slate-200 object-cover"
                     />
                   ) : null}
                 </div>
@@ -289,7 +310,7 @@ export default async function AccountAttendancePage({
             ))}
 
             {events.length === 0 ? (
-              <p className="rounded-2xl border border-white/10 bg-slate-900 p-4 text-sm text-slate-500">
+              <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
                 No attendance action submitted today.
               </p>
             ) : null}

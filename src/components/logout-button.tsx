@@ -9,8 +9,8 @@ export function LogoutButton({
 }) {
   const buttonClass =
     variant === "compact"
-      ? "group inline-flex items-center justify-center gap-1.5 rounded-2xl bg-cyan-300 px-3 py-2 text-xs font-bold text-slate-950 shadow-lg shadow-cyan-950/20 transition hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 sm:gap-2 sm:px-5 sm:py-3 sm:text-sm"
-      : "group flex w-full items-center justify-center gap-2 rounded-2xl border border-cyan-300/30 bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-950/20 transition hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-300/40";
+      ? "group inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow-sm shadow-slate-200/70 transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:gap-2 sm:px-5 sm:py-3 sm:text-sm"
+      : "group flex w-full items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-sm shadow-slate-200/70 transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100";
 
   return (
     <form action={logoutAction} className={variant === "compact" ? "" : "w-full"}>

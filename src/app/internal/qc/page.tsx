@@ -1,460 +1,442 @@
+import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
-import { OrderStatusTimeline } from "@/components/order-status-timeline";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
-import { getOrderStatusHistoryMap } from "@/lib/order-status-history";
-import { approveQcAction } from "./actions";
+import {
+  getDarkOrderStatusClass,
+  getOrderStatusLabel,
+} from "@/lib/order-fulfillment";
+import {
+  approveQcAction,
+  requestQcReworkAction,
+} from "./actions";
+import {
+  QcTransportAssignmentForm,
+  QC_SCROLL_STORAGE_KEY,
+} from "@/components/qc-transport-assignment-form";
+import {
+  TeamFeedbackToast,
+  type TeamFeedbackMessage,
+} from "@/components/team-feedback-toast";
 
-function getOrderStatusLabel(status: string) {
-  if (status === "NEW_ORDER") return "New Order";
-  if (status === "STOCK_CHECKED") return "Stock Checked";
-  if (status === "STOCK_BLOCKED") return "Stock Blocked";
-  if (status === "READY_FOR_DISPATCH") return "Ready for Dispatch";
-  if (status === "QC_APPROVED") return "QC Approved";
-  if (status === "TRANSPORT_ASSIGNED") return "Transport Assigned";
-  if (status === "ON_THE_WAY") return "On The Way";
-  if (status === "DELIVERED") return "Delivered";
-  if (status === "INVOICE_UPLOADED") return "Invoice Uploaded";
-  if (status === "CANCELLED") return "Cancelled";
+function formatDateTime(value: Date | null) {
+  if (!value) return "—";
 
-  return status;
-}
-
-function getOrderStatusClass(status: string) {
-  if (status === "READY_FOR_DISPATCH") {
-    return "bg-blue-300/10 text-blue-300";
-  }
-
-  if (status === "QC_APPROVED") {
-    return "bg-emerald-300/10 text-emerald-300";
-  }
-
-  if (status === "STOCK_BLOCKED") {
-    return "bg-purple-300/10 text-purple-300";
-  }
-
-  if (status === "DELIVERED") {
-    return "bg-emerald-300/10 text-emerald-300";
-  }
-
-  if (status === "CANCELLED") {
-    return "bg-red-300/10 text-red-300";
-  }
-
-  return "bg-yellow-300/10 text-yellow-300";
-}
-
-function formatDate(date: Date) {
   return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata",
+  }).format(value);
 }
 
-function getQcMessage(error?: string, success?: string) {
-  if (success === "qc-approved") {
-    return {
+function assignmentLabel(status: string) {
+  const labels: Record<string, string> = {
+    ASSIGNED: "Assigned",
+    IN_PROGRESS: "In Progress",
+    READY_FOR_QC: "Ready for QC",
+    ISSUE_REPORTED: "Issue Reported",
+    QC_REWORK: "QC Rework",
+    COMPLETED: "QC Approved",
+    CANCELLED: "Cancelled",
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
+}
+
+function assignmentClass(status: string) {
+  if (status === "READY_FOR_QC" || status === "COMPLETED") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+  if (status === "QC_REWORK" || status === "ISSUE_REPORTED") {
+    return "bg-rose-50 text-rose-700";
+  }
+  return "bg-amber-50 text-amber-700";
+}
+
+function getMessage(
+  error?: string,
+  success?: string,
+): TeamFeedbackMessage | null {
+  const successMessages: Record<string, TeamFeedbackMessage> = {
+    "qc-approved": {
       type: "success",
-      text: "Order approved by QC successfully.",
-    };
-  }
+      title: "QC approved",
+      text: "The complete order is approved. Transport and driver can now be assigned.",
+    },
+    "rework-requested": {
+      type: "success",
+      title: "Rework requested",
+      text: "The responsible Physical Team has received the QC rework request.",
+    },
+    "transport-assigned": {
+      type: "success",
+      title: "Delivery assigned",
+      text: "Transport and driver were assigned successfully. The delivery is now visible in the field portal.",
+    },
+  };
+  const errorMessages: Record<string, TeamFeedbackMessage> = {
+    "permission-denied": { type: "error", title: "Permission denied", text: "You do not have permission to manage QC." },
+    "missing-order": { type: "error", title: "Order missing", text: "Order id is missing." },
+    "order-not-found": { type: "error", title: "Order not found", text: "Selected order was not found." },
+    "invalid-status": { type: "error", title: "Action unavailable", text: "This order is not ready for QC approval." },
+    "physical-checks-incomplete": { type: "error", title: "Physical checks incomplete", text: "All Physical Team assignments must be Ready for QC before approval." },
+    "full-quantity-required": { type: "error", title: "Complete quantity required", text: "QC and driver assignment remain unavailable until every item is fully reserved and physically verified for its complete ordered quantity." },
+    "missing-assignment": { type: "error", title: "Assignment missing", text: "Physical assignment id is missing." },
+    "assignment-not-found": { type: "error", title: "Assignment not found", text: "Selected physical assignment was not found." },
+    "rework-note-required": { type: "error", title: "Rework note required", text: "Add a clear QC rework note before sending it back." },
+    "invalid-rework-status": { type: "error", title: "Rework unavailable", text: "Only a team assignment currently Ready for QC can be returned for rework." },
+    "missing-driver": { type: "error", title: "Driver required", text: "Select a driver." },
+    "missing-transport": { type: "error", title: "Transport required", text: "Select a transport option." },
+    "driver-not-found": { type: "error", title: "Driver unavailable", text: "Selected driver is inactive or does not have Driver / Transport access." },
+    "transport-not-found": { type: "error", title: "Transport unavailable", text: "Selected transport option is disabled or missing." },
+    "transport-status-invalid": { type: "error", title: "Assignment unavailable", text: "QC must approve the order before transport assignment." },
+  };
 
-  if (error === "permission-denied") {
-    return {
-      type: "error",
-      text: "You do not have permission to manage QC.",
-    };
-  }
-
-  if (error === "missing-order") {
-    return {
-      type: "error",
-      text: "Order id is missing.",
-    };
-  }
-
-  if (error === "order-not-found") {
-    return {
-      type: "error",
-      text: "Selected order was not found in the database.",
-    };
-  }
-
-  if (error === "invalid-status") {
-    return {
-      type: "error",
-      text: "Only orders marked as Ready for Dispatch can be approved by QC.",
-    };
-  }
-
-  return null;
+  return (success && successMessages[success]) ||
+    (error && errorMessages[error]) ||
+    null;
 }
 
 export default async function QcPage({
   searchParams,
 }: {
-  searchParams?: Promise<{
-    error?: string;
-    success?: string;
-  }>;
+  searchParams?: Promise<{ error?: string; success?: string }>;
 }) {
   const params = await searchParams;
-  const message = getQcMessage(params?.error, params?.success);
-
-  const { hasAccess } = await checkPermission("manage_qc");
+  const message = getMessage(params?.error, params?.success);
+  const { hasAccess } = await checkPermission("manage_qc", "/internal/qc");
 
   if (!hasAccess) {
     return (
       <AccessDeniedCard
         title="QC Access Denied"
-        description="Your current role does not have permission to access the Quality Check module."
+        description="Your account does not have permission to manage Quality Check and transport assignment."
         backHref="/internal/dashboard"
         backLabel="Go to Dashboard"
       />
     );
   }
 
-  const orders = await prisma.order.findMany({
-    where: {
-      status: {
-        in: ["STOCK_BLOCKED", "READY_FOR_DISPATCH", "QC_APPROVED"],
-      },
-    },
-    include: {
-      dealer: true,
-      items: {
-        include: {
-          product: true,
+  const [orders, drivers, transportOptions] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        status: {
+          in: ["PENDING_QC", "QC_REWORK", "QC_APPROVED", "TRANSPORT_ASSIGNED"],
         },
       },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+      include: {
+        dealer: { select: { name: true, email: true, phone: true } },
+        assignedDriver: { select: { name: true, phone: true } },
+        transportOption: true,
+        items: {
+          include: {
+            product: { include: { category: true, brand: true } },
+            physicalAssignmentItem: {
+              include: {
+                assignment: { include: { team: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+        physicalAssignments: {
+          include: {
+            team: true,
+            items: {
+              include: {
+                orderItem: {
+                  include: {
+                    product: { include: { category: true, brand: true } },
+                  },
+                },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+          orderBy: { assignedAt: "asc" },
+        },
+      },
+      orderBy: { updatedAt: "asc" },
+    }),
+    prisma.user.findMany({
+      where: {
+        status: "ACTIVE",
+        OR: [
+          { role: "DRIVER_TRANSPORT" },
+          { roleAssignments: { some: { role: "DRIVER_TRANSPORT" } } },
+        ],
+      },
+      select: { id: true, name: true, phone: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.transportOption.findMany({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    }),
+  ]);
 
-  const statusHistoryMap = await getOrderStatusHistoryMap(
-    prisma,
-    orders.map((order) => order.id)
-  );
-  const ordersWithHistory = orders.map((order) => ({
-    ...order,
-    statusHistory: statusHistoryMap.get(order.id) ?? [],
-  }));
-
-  const totalQcOrders = ordersWithHistory.length;
-
-  const waitingForQc = ordersWithHistory.filter(
-    (order) => order.status === "READY_FOR_DISPATCH"
+  const waiting = orders.filter((order) => order.status === "PENDING_QC").length;
+  const rework = orders.filter((order) => order.status === "QC_REWORK").length;
+  const approved = orders.filter((order) => order.status === "QC_APPROVED").length;
+  const assigned = orders.filter(
+    (order) => order.status === "TRANSPORT_ASSIGNED",
   ).length;
-
-  const approvedOrders = ordersWithHistory.filter(
-    (order) => order.status === "QC_APPROVED"
-  ).length;
-
-  const stockBlockedOrders = ordersWithHistory.filter(
-    (order) => order.status === "STOCK_BLOCKED"
-  ).length;
-
-  const stats = [
-    {
-      label: "QC Orders",
-      value: String(totalQcOrders),
-    },
-    {
-      label: "Waiting for QC",
-      value: String(waitingForQc),
-    },
-    {
-      label: "QC Approved",
-      value: String(approvedOrders),
-    },
-    {
-      label: "Stock Blocked",
-      value: String(stockBlockedOrders),
-    },
-  ];
 
   return (
-    <div>
-      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-300 sm:text-sm">
-            Quality Check
-          </p>
-
-          <h1 className="mt-2 text-2xl font-bold sm:mt-3 sm:text-3xl md:text-5xl">
-            QC Management
-          </h1>
-
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-slate-300 sm:mt-4 sm:text-sm sm:leading-6">
-            Review orders that are ready for dispatch, verify product details,
-            and approve them before transport assignment.
-          </p>
+    <div className="space-y-7">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.35em] text-emerald-600">
+              Quality Check Team
+            </p>
+            <h1 className="mt-3 text-3xl font-black text-slate-950">
+              QC & Transport Assignment
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
+              Approve physically checked products, send only the responsible team back for rework, and assign transport and driver after QC approval. No extra dispatch team is used after QC.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/internal/dispatch"
+              className="rounded-2xl border border-emerald-200 px-5 py-3 text-sm font-black text-emerald-700 hover:bg-emerald-50"
+            >
+              Physical Check Queue
+            </Link>
+            <Link
+              href="/internal/transport"
+              className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-black text-white hover:bg-emerald-700"
+            >
+              Transport Options
+            </Link>
+          </div>
         </div>
+      </section>
 
-        <a
-          href="/internal/dispatch"
-          className="w-full rounded-2xl border border-white/10 px-5 py-3 text-center text-sm font-bold text-slate-200 transition hover:bg-white/10 hover:text-white sm:w-auto"
-        >
-          Go to Dispatch
-        </a>
-      </div>
+      <TeamFeedbackToast
+        message={message}
+        restoreScrollKey={QC_SCROLL_STORAGE_KEY}
+      />
 
-      {message && (
-        <div
-          className={`mt-8 rounded-2xl border px-5 py-4 text-sm font-semibold ${
-            message.type === "success"
-              ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-300"
-              : "border-red-300/20 bg-red-300/10 text-red-300"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 xl:grid-cols-4">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:rounded-3xl sm:p-6"
-          >
-            <p className="text-sm text-slate-400">{stat.label}</p>
-            <h2 className="mt-2 text-2xl font-bold sm:mt-3 sm:text-3xl">{stat.value}</h2>
+      <section className="grid gap-4 md:grid-cols-4">
+        {[
+          ["Waiting for QC", waiting],
+          ["QC Rework", rework],
+          ["QC Approved", approved],
+          ["Transport Assigned", assigned],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-2xl border border-slate-200 bg-white p-5">
+            <p className="text-sm text-slate-500">{label}</p>
+            <p className="mt-2 text-3xl font-black text-slate-950">{value}</p>
           </div>
         ))}
-      </div>
+      </section>
 
-      <div className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
-        <div className="border-b border-white/10 p-4 sm:p-6">
-          <h2 className="text-xl font-bold">QC Order List</h2>
-
-          <p className="mt-2 text-sm text-slate-400">
-            Orders appear here after stock is blocked and dispatch marks them as
-            ready.
-          </p>
-        </div>
-
-        {ordersWithHistory.length === 0 ? (
-          <div className="p-6 text-center sm:p-10">
-            <h3 className="text-lg font-bold text-white">No QC orders found</h3>
-            <p className="mt-2 text-sm text-slate-400">
-              Orders will appear here after dispatch starts processing them.
+      <section className="space-y-5">
+        {orders.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
+            <h2 className="text-xl font-black text-slate-950">No QC work</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Orders appear after all assigned Physical Dispatch Teams complete their checks.
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-white/10">
-            {ordersWithHistory.map((order) => {
-              const totalQuantity = order.items.reduce(
-                (total, item) => total + item.quantity,
-                0
+          orders.map((order) => {
+            const allReady =
+              order.physicalAssignments.length > 0 &&
+              order.physicalAssignments.every(
+                (assignment) => assignment.status === "READY_FOR_QC",
               );
 
-              return (
-                <div key={order.id} className="p-4 sm:p-6">
-                  <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            return (
+              <article
+                key={order.id}
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60"
+              >
+                <div className="border-b border-slate-200 p-5 sm:p-6">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div>
                       <div className="flex flex-wrap items-center gap-3">
-                        <h3 className="text-xl font-bold text-white">
+                        <h2 className="text-xl font-black text-slate-950">
                           {order.orderNumber}
-                        </h3>
-
+                        </h2>
                         <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getOrderStatusClass(
-                            order.status
+                          className={`rounded-full px-3 py-1 text-xs font-black ${getDarkOrderStatusClass(
+                            order.status,
                           )}`}
                         >
                           {getOrderStatusLabel(order.status)}
                         </span>
                       </div>
-
-                      <p className="mt-2 text-sm text-slate-400">
-                        Dealer:{" "}
-                        <span className="font-semibold text-slate-200">
-                          {order.dealer.name}
-                        </span>{" "}
-                        · {order.dealer.email}
+                      <p className="mt-2 text-sm text-slate-500">
+                        Dealer: <strong className="text-slate-800">{order.dealer.name}</strong> · {order.dealer.email}
                       </p>
-
-                      <p className="mt-1 text-sm text-slate-500">
-                        Placed on {formatDate(order.createdAt)}
+                      <p className="mt-1 text-xs text-slate-500">
+                        Updated {formatDateTime(order.updatedAt)}
                       </p>
-
-                      {order.notes && (
-                        <p className="mt-4 max-w-2xl rounded-2xl bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-300">
-                          {order.notes}
-                        </p>
-                      )}
                     </div>
-
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
-                        <p className="text-xs text-slate-500">Items</p>
-                        <p className="mt-1 text-lg font-bold text-white">
-                          {order.items.length}
-                        </p>
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">Products</p>
+                        <p className="mt-1 text-xl font-black text-slate-950">{order.items.length}</p>
                       </div>
-
-                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
-                        <p className="text-xs text-slate-500">Quantity</p>
-                        <p className="mt-1 text-lg font-bold text-white">
-                          {totalQuantity}
-                        </p>
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">Physical Teams</p>
+                        <p className="mt-1 text-xl font-black text-slate-950">{order.physicalAssignments.length}</p>
                       </div>
-
-                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
-                        <p className="text-xs text-slate-500">Status</p>
-                        <p className="mt-1 text-sm font-bold text-white">
-                          {getOrderStatusLabel(order.status)}
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">Ready</p>
+                        <p className="mt-1 text-xl font-black text-slate-950">
+                          {order.physicalAssignments.filter((row) =>
+                            ["READY_FOR_QC", "COMPLETED"].includes(row.status),
+                          ).length}
                         </p>
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  <div className="mt-5 grid gap-3 lg:hidden">
-                    {order.items.map((item) => (
-                      <article
-                        key={`mobile-item-${item.id}`}
-                        className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"
+                <div className="p-5 sm:p-6">
+                  <div className="grid gap-4">
+                    {order.physicalAssignments.map((assignment) => (
+                      <div
+                        key={assignment.id}
+                        className="rounded-2xl border border-slate-200 p-4"
                       >
-                        <div className="min-w-0">
-                          <h4 className="truncate text-sm font-bold text-white">
-                            {item.product.name}
-                          </h4>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {item.product.code}
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-black text-slate-950">{assignment.team.name}</h3>
+                              <span
+                                className={`rounded-full px-3 py-1 text-xs font-black ${assignmentClass(
+                                  assignment.status,
+                                )}`}
+                              >
+                                {assignmentLabel(assignment.status)}
+                              </span>
+                            </div>
+                            {assignment.issueNotes ? (
+                              <p className="mt-2 text-sm font-bold text-rose-700">
+                                Issue: {assignment.issueNotes}
+                              </p>
+                            ) : null}
+                            {assignment.qcNotes ? (
+                              <p className="mt-2 text-sm font-bold text-rose-700">
+                                QC Note: {assignment.qcNotes}
+                              </p>
+                            ) : null}
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            Completed {formatDateTime(assignment.completedAt)}
                           </p>
                         </div>
 
-                        <div className="mt-4 grid grid-cols-2 gap-2 min-[420px]:grid-cols-4">
-                          <div className="rounded-xl bg-white/[0.04] p-2">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-                              Stack
-                            </p>
-                            <p className="mt-1 text-xs font-bold text-slate-300">
-                              {item.product.stack}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl bg-white/[0.04] p-2">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-                              Avail
-                            </p>
-                            <p className="mt-1 text-xs font-bold text-emerald-300">
-                              {item.product.quantity}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl bg-white/[0.04] p-2">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-                              Order
-                            </p>
-                            <p className="mt-1 text-xs font-bold text-slate-300">
-                              {item.quantity}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl bg-white/[0.04] p-2">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-                              Block
-                            </p>
-                            <p className="mt-1 text-xs font-bold text-cyan-300">
-                              {item.blockedQuantity}
-                            </p>
-                          </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                          {assignment.items.map((item) => (
+                            <div key={item.id} className="rounded-2xl bg-slate-50 p-4">
+                              <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                                {item.orderItem.product.code} · {item.orderItem.product.brand.name}
+                              </p>
+                              <p className="mt-2 font-black text-slate-950">
+                                {item.orderItem.product.name}
+                              </p>
+                              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                                <div>
+                                  <p className="text-slate-500">Assigned</p>
+                                  <p className="mt-1 font-black text-slate-800">{item.assignedQuantity}</p>
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">Verified</p>
+                                  <p className="mt-1 font-black text-emerald-700">{item.verifiedQuantity ?? 0}</p>
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">Damaged</p>
+                                  <p className="mt-1 font-black text-rose-700">{item.damagedQuantity}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      </article>
+
+                        {order.status === "PENDING_QC" && assignment.status === "READY_FOR_QC" ? (
+                          <form action={requestQcReworkAction} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                            <input type="hidden" name="assignmentId" value={assignment.id} />
+                            <label>
+                              <span className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                                Rework Note
+                              </span>
+                              <input
+                                name="qcNotes"
+                                placeholder="Explain exactly what this team must correct"
+                                className="mt-2 h-12 w-full rounded-2xl border border-rose-200 px-4 text-sm outline-none focus:border-rose-500"
+                              />
+                            </label>
+                            <button className="h-12 rounded-2xl border border-rose-300 px-5 text-sm font-black text-rose-700 hover:bg-rose-50">
+                              Send This Team for Rework
+                            </button>
+                          </form>
+                        ) : null}
+                      </div>
                     ))}
                   </div>
 
-                  <div className="mt-5 hidden overflow-x-auto rounded-2xl border border-white/10 lg:block">
-                    <table className="w-full min-w-[760px] table-fixed text-left text-sm">
-                      <colgroup>
-                        <col className="w-[38%]" />
-                        <col className="w-[14%]" />
-                        <col className="w-[14%]" />
-                        <col className="w-[14%]" />
-                        <col className="w-[20%]" />
-                      </colgroup>
-
-                      <thead className="bg-white/[0.04] text-slate-300">
-                        <tr>
-                          <th className="px-4 py-3 font-semibold">Product</th>
-                          <th className="px-4 py-3 font-semibold">Stack</th>
-                          <th className="px-4 py-3 font-semibold">
-                            Available
-                          </th>
-                          <th className="px-4 py-3 font-semibold">Ordered</th>
-                          <th className="px-4 py-3 font-semibold">Blocked</th>
-                        </tr>
-                      </thead>
-
-                      <tbody className="divide-y divide-white/10">
-                        {order.items.map((item) => (
-                          <tr key={item.id} className="text-slate-300">
-                            <td className="px-4 py-4">
-                              <p className="break-words font-semibold text-white">
-                                {item.product.name}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {item.product.code}
-                              </p>
-                            </td>
-
-                            <td className="px-4 py-4">
-                              {item.product.stack}
-                            </td>
-
-                            <td className="px-4 py-4">
-                              {item.product.quantity}
-                            </td>
-
-                            <td className="px-4 py-4">{item.quantity}</td>
-
-                            <td className="px-4 py-4">
-                              {item.blockedQuantity}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <OrderStatusTimeline history={order.statusHistory} />
-
-                  <div className="mt-5 flex flex-wrap gap-3">
-                    {order.status === "READY_FOR_DISPATCH" && (
-                      <form action={approveQcAction}>
-                        <input type="hidden" name="orderId" value={order.id} />
-
+                  {order.status === "PENDING_QC" ? (
+                    <form action={approveQcAction} className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                      <input type="hidden" name="orderId" value={order.id} />
+                      <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+                        <label>
+                          <span className="text-xs font-black uppercase tracking-[0.14em] text-emerald-800">
+                            QC Approval Note
+                          </span>
+                          <input
+                            name="qcNotes"
+                            placeholder="Optional final QC note"
+                            className="mt-2 h-12 w-full rounded-2xl border border-emerald-200 bg-white px-4 text-sm"
+                          />
+                        </label>
                         <button
-                          type="submit"
-                          className="rounded-2xl bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"
+                          disabled={!allReady}
+                          className="h-12 rounded-2xl bg-emerald-600 px-6 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                         >
-                          Approve QC
+                          Approve Complete Order
                         </button>
-                      </form>
-                    )}
-
-                    {order.status === "STOCK_BLOCKED" && (
-                      <div className="rounded-2xl border border-purple-300/20 bg-purple-300/10 px-5 py-3 text-sm font-semibold text-purple-300">
-                        Waiting for dispatch to mark ready
                       </div>
-                    )}
+                      {!allReady ? (
+                        <p className="mt-3 text-xs font-bold text-rose-700">
+                          Every physical assignment must be Ready for QC before approval.
+                        </p>
+                      ) : null}
+                    </form>
+                  ) : null}
 
-                    {order.status === "QC_APPROVED" && (
-                      <div className="rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-5 py-3 text-sm font-semibold text-emerald-300">
-                        QC already approved
-                      </div>
-                    )}
-                  </div>
+                  {order.status === "QC_REWORK" ? (
+                    <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-800">
+                      This order is waiting for the rejected Physical Dispatch Team to complete rework.
+                    </div>
+                  ) : null}
+
+                  {order.status === "QC_APPROVED" ? (
+                    <QcTransportAssignmentForm
+                      orderId={order.id}
+                      drivers={drivers}
+                      transportOptions={transportOptions}
+                    />
+                  ) : null}
+
+                  {order.status === "TRANSPORT_ASSIGNED" ? (
+                    <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                      <h3 className="font-black text-blue-900">Delivery Assigned</h3>
+                      <p className="mt-2 text-sm text-blue-800">
+                        Transport: <strong>{order.transportOption?.name || order.transportLabel || "—"}</strong> · Driver: <strong>{order.assignedDriver?.name || "—"}</strong>
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
-              );
-            })}
-          </div>
+              </article>
+            );
+          })
         )}
-      </div>
+      </section>
     </div>
   );
 }

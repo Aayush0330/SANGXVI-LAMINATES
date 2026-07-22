@@ -1,3 +1,28 @@
 {
-  "buildCommand": "npx prisma generate && npx prisma migrate deploy && npx prisma db seed && next build"
+  "crons": [
+    {
+      "path": "/api/cron/backup",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/alert-escalation",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/daily-report",
+      "schedule": "30 20 * * *"
+    },
+    {
+      "path": "/api/cron/reorder-alerts",
+      "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/cron/task-reminders",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/attendance-close",
+      "schedule": "30 18 * * *"
+    }
+  ]
 }

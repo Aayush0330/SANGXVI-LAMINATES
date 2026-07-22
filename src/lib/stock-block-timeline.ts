@@ -74,7 +74,7 @@ export async function recordStockBlockTimeline({
 
   await client.$executeRawUnsafe(
     `
-      INSERT INTO "StockBlockTimeline" (
+      INSERT INTO public."StockBlockTimeline" (
         "id",
         "productId",
         "orderId",
@@ -152,7 +152,7 @@ export async function closeStockBlockTimeline({
         "blockedByName",
         "blockedByEmail",
         "notes"
-      FROM "StockBlockTimeline"
+      FROM public."StockBlockTimeline"
       WHERE "orderId" = $1
         AND "orderItemId" = $2
         AND "productId" = $3
@@ -166,6 +166,49 @@ export async function closeStockBlockTimeline({
     productId
   );
 
+  if (activeRows.length === 0) {
+    await client.$executeRawUnsafe(
+      `
+        INSERT INTO public."StockBlockTimeline" (
+          "id",
+          "productId",
+          "orderId",
+          "orderItemId",
+          "quantity",
+          "status",
+          "blockReason",
+          "releaseReason",
+          "blockedAt",
+          "releasedAt",
+          "blockedById",
+          "blockedByName",
+          "blockedByEmail",
+          "releasedById",
+          "releasedByName",
+          "releasedByEmail",
+          "notes",
+          "createdAt",
+          "updatedAt"
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, 'LEGACY_BLOCK_WITHOUT_ACTIVE_TIMELINE', $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, NULL, $8, $9, $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `,
+      createTimelineId(),
+      productId,
+      orderId,
+      orderItemId,
+      quantity,
+      status,
+      releaseReason,
+      user.userId,
+      user.userName,
+      user.userEmail,
+      notes ??
+        `${quantity} quantity was closed even though no active stock-block timeline row existed.`
+    );
+
+    return quantity;
+  }
+
   for (const row of activeRows) {
     if (remainingToClose <= 0) {
       break;
@@ -178,7 +221,7 @@ export async function closeStockBlockTimeline({
     if (remainingInRow <= 0) {
       await client.$executeRawUnsafe(
         `
-          UPDATE "StockBlockTimeline"
+          UPDATE public."StockBlockTimeline"
           SET
             "status" = $1,
             "releaseReason" = $2,
@@ -201,7 +244,7 @@ export async function closeStockBlockTimeline({
     } else {
       await client.$executeRawUnsafe(
         `
-          UPDATE "StockBlockTimeline"
+          UPDATE public."StockBlockTimeline"
           SET "quantity" = $1, "updatedAt" = CURRENT_TIMESTAMP
           WHERE "id" = $2
         `,
@@ -211,7 +254,7 @@ export async function closeStockBlockTimeline({
 
       await client.$executeRawUnsafe(
         `
-          INSERT INTO "StockBlockTimeline" (
+          INSERT INTO public."StockBlockTimeline" (
             "id",
             "productId",
             "orderId",

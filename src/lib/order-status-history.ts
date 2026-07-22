@@ -56,7 +56,7 @@ function getFallbackToStatus(title: string) {
   }
 
   if (normalizedTitle.includes("partially delivered")) {
-    return "PARTIALLY_DELIVERED";
+    return "DELIVERED";
   }
 
   if (normalizedTitle.includes("delivered")) {
@@ -65,6 +65,30 @@ function getFallbackToStatus(title: string) {
 
   if (normalizedTitle.includes("driver")) {
     return "TRANSPORT_ASSIGNED";
+  }
+
+  if (normalizedTitle.includes("all physical checks") || normalizedTitle.includes("sent to qc")) {
+    return "PENDING_QC";
+  }
+
+  if (normalizedTitle.includes("qc rework")) {
+    return "QC_REWORK";
+  }
+
+  if (normalizedTitle.includes("physical check issue")) {
+    return "PHYSICAL_CHECK_ISSUE";
+  }
+
+  if (normalizedTitle.includes("physical check started")) {
+    return "PHYSICAL_CHECK_IN_PROGRESS";
+  }
+
+  if (normalizedTitle.includes("physical teams assigned")) {
+    return "PHYSICAL_CHECK_ASSIGNED";
+  }
+
+  if (normalizedTitle.includes("order received")) {
+    return "PENDING_TEAM_ASSIGNMENT";
   }
 
   if (normalizedTitle.includes("qc")) {
@@ -80,7 +104,7 @@ function getFallbackToStatus(title: string) {
   }
 
   if (normalizedTitle.includes("partial")) {
-    return "PARTIALLY_BLOCKED";
+    return "STOCK_BLOCKED";
   }
 
   if (normalizedTitle.includes("block")) {
@@ -89,6 +113,10 @@ function getFallbackToStatus(title: string) {
 
   if (normalizedTitle.includes("stock checked")) {
     return "STOCK_CHECKED";
+  }
+
+  if (normalizedTitle.includes("passed to inventory")) {
+    return "PENDING_STOCK_CHECK";
   }
 
   return "NEW_ORDER";
@@ -124,7 +152,7 @@ export async function getOrderStatusHistoryMap(
         "changedByEmail",
         "changedByRole",
         "createdAt"
-      FROM "OrderStatusHistory"
+      FROM public."OrderStatusHistory"
       WHERE "orderId" IN (${placeholders})
       ORDER BY "createdAt" ASC
     `,
@@ -177,7 +205,7 @@ export async function recordOrderStatusHistory({
 
   await client.$executeRawUnsafe(
     `
-      INSERT INTO "OrderStatusHistory" (
+      INSERT INTO public."OrderStatusHistory" (
         "id",
         "orderId",
         "fromStatus",
@@ -189,7 +217,7 @@ export async function recordOrderStatusHistory({
         "changedByRole",
         "createdAt"
       )
-      VALUES ($1, $2, $3::"OrderStatus", $4::"OrderStatus", $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3::public."OrderStatus", $4::public."OrderStatus", $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
     `,
     createHistoryId(),
     orderId,

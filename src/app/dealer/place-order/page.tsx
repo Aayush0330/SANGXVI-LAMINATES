@@ -1,483 +1,112 @@
+import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
 import { checkPermission } from "@/lib/auth-guards";
+import { getPortalLandingLabel, getPortalLandingPath } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
-import { createDealerOrderAction } from "./actions";
+import { getDealerCart } from "@/lib/dealer-cart-db";
+import { DealerOrderBuilder } from "./order-builder-client";
 
-function SelectArrow() {
-  return (
-    <div className="pointer-events-none absolute inset-y-0 right-5 flex items-center">
-      <svg
-        className="h-5 w-5 text-slate-500"
-        viewBox="0 0 20 20"
-        fill="none"
-        aria-hidden="true"
-      >
-        <path
-          d="M5 7.5L10 12.5L15 7.5"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </div>
-  );
-}
-
-function getPlaceOrderMessage(
-  error?: string,
-  success?: string,
-  orderNumber?: string,
-  available?: string
-) {
-  if (success === "order-created") {
-    return {
-      type: "success",
-      text: `Order ${orderNumber} created successfully. Your order is now waiting for internal stock check.`,
-    };
-  }
-
-  if (error === "permission-denied") {
-    return {
-      type: "error",
-      text: "You do not have permission to place dealer orders.",
-    };
-  }
-
-  if (error === "missing-product") {
-    return {
-      type: "error",
-      text: "Please select a product before placing the order.",
-    };
-  }
-
-  if (error === "invalid-quantity") {
-    return {
-      type: "error",
-      text: "Order quantity must be greater than zero.",
-    };
-  }
-
-  if (error === "dealer-not-found") {
-    return {
-      type: "error",
-      text: "Dealer account was not found in the database.",
-    };
-  }
-
-  if (error === "product-not-found") {
-    return {
-      type: "error",
-      text: "Selected product was not found in the database.",
-    };
-  }
-
-  if (error === "out-of-stock") {
-    return {
-      type: "error",
-      text: "Selected product is currently out of stock.",
-    };
-  }
-
-  if (error === "not-enough-stock") {
-    return {
-      type: "error",
-      text: `Requested quantity is higher than available stock. Available stock: ${available}.`,
-    };
-  }
-
+function getMessage(error?: string, success?: string, orderNumber?: string, products?: string, inquiryNumber?: string) {
+  if (success === "order-created") return { type: "success", text: `Order ${orderNumber ?? ""} was created successfully. Your saved cart was cleared and the order was sent to the Order Receiving Team.` };
+  if (error === "permission-denied") return { type: "error", text: "You do not have permission to create dealer orders." };
+  if (error === "empty-order") return { type: "error", text: "Add at least one product before placing the order." };
+  if (error === "invalid-items") return { type: "error", text: "The saved cart contains invalid products, quantities or notes." };
+  if (error === "dealer-not-found") return { type: "error", text: "Your active dealer account was not found." };
+  if (error === "product-not-found") return { type: "error", text: "One or more saved products were archived or removed. Review and remove unavailable items before ordering." };
+  if (error === "pricing-unavailable") return { type: "error", text: "Dealer pricing is unavailable for one or more products. Ask the internal team to complete Product Master pricing." };
+  if (error === "stock-issues") return { type: "error", text: `${products || "Some products"} do not have enough stock. Your cart was preserved and stock request ${inquiryNumber ?? ""} was created for internal follow-up.` };
+  if (error === "cart-not-saved") return { type: "error", text: "Wait for the cart to finish saving before placing the order." };
+  if (error === "cart-conflict") return { type: "error", text: "This cart was changed in another browser or device. The latest saved cart has been loaded; review it before ordering." };
+  if (error === "cart-pricing-changed") return { type: "error", text: "Dealer price or GST changed while you were reviewing the cart. The saved cart was refreshed with current pricing; review the new totals and place the order again." };
+  if (error === "cart-stock-changed") return { type: "error", text: "Stock changed while the order was being submitted. Your cart was preserved; review the latest availability before trying again." };
   return null;
-}
-
-function getProductStatusLabel(status: string) {
-  if (status === "AVAILABLE") return "Available";
-  if (status === "LOW_STOCK") return "Low Stock";
-  if (status === "OUT_OF_STOCK") return "Out of Stock";
-
-  return status;
-}
-
-function getProductStatusClass(status: string) {
-  if (status === "AVAILABLE") {
-    return "bg-emerald-100 text-emerald-700";
-  }
-
-  if (status === "LOW_STOCK") {
-    return "bg-yellow-100 text-yellow-700";
-  }
-
-  return "bg-red-100 text-red-700";
 }
 
 export default async function DealerPlaceOrderPage({
   searchParams,
 }: {
-  searchParams?: Promise<{
-    error?: string;
-    success?: string;
-    orderNumber?: string;
-    available?: string;
-  }>;
+  searchParams?: Promise<{ product?: string; error?: string; success?: string; orderNumber?: string; products?: string; inquiryNumber?: string }>;
 }) {
   const params = await searchParams;
+  const { currentUser, hasAccess } = await checkPermission("place_dealer_order");
 
-  const message = getPlaceOrderMessage(
-    params?.error,
-    params?.success,
-    params?.orderNumber,
-    params?.available
-  );
-
-  const { hasAccess } = await checkPermission("place_dealer_order");
-
-  if (!hasAccess) {
+  if (!hasAccess || !currentUser.roles.includes("dealer")) {
     return (
       <AccessDeniedCard
-        title="Place Order Access Denied"
+        title="Order Access Denied"
         description="Your current role does not have permission to place dealer orders."
-        backHref="/dealer/dashboard"
-        backLabel="Go to Dashboard"
+        backHref={getPortalLandingPath(currentUser.role)}
+        backLabel={getPortalLandingLabel(currentUser.role)}
       />
     );
   }
 
+  const savedCart = await getDealerCart(prisma, currentUser.id);
+
+  const savedProductIds = savedCart?.items.map((item) => item.productId) ?? [];
   const products = await prisma.product.findMany({
-    orderBy: {
-      createdAt: "asc",
+    where: {
+      OR: [
+        { isActive: true, quantity: { gt: 0 } },
+        ...(savedProductIds.length ? [{ id: { in: savedProductIds } }] : []),
+      ],
     },
+    include: { category: true, brand: true },
+    orderBy: [{ isActive: "desc" }, { quantity: "desc" }, { name: "asc" }],
   });
 
-  const availableProducts = products.filter((product) => product.quantity > 0);
+  const serializableProducts = products.map((product) => {
+    const selectedPrice = product.dealerPrice ?? product.sellingPrice;
+    return {
+      id: product.id,
+      code: product.code,
+      name: product.name,
+      description: product.description,
+      unit: product.unit,
+      quantity: product.quantity,
+      minimumStock: product.minimumStock,
+      gstRate: Number(product.gstRate),
+      dealerPrice: selectedPrice === null ? null : Number(selectedPrice),
+      priceSource: product.dealerPrice !== null ? "DEALER_PRICE" as const : "SELLING_PRICE" as const,
+      pricingAvailable: selectedPrice !== null,
+      isActive: product.isActive,
+      imageMimeType: product.imageMimeType,
+      category: { id: product.category.id, name: product.category.name },
+      brand: { id: product.brand.id, name: product.brand.name },
+    };
+  });
 
-  const totalProducts = products.length;
-  const availableProductCount = availableProducts.length;
-  const lowStockProducts = products.filter(
-    (product) =>
-      product.status === "LOW_STOCK" ||
-      product.quantity <= product.minimumStock
-  ).length;
-  const outOfStockProducts = products.filter(
-    (product) => product.quantity <= 0
-  ).length;
+  const initialCart = (savedCart?.items ?? []).map((item) => ({
+    productId: item.productId,
+    quantity: item.quantity,
+    unitPriceSnapshot: Number(item.unitPriceSnapshot),
+    gstRateSnapshot: Number(item.gstRateSnapshot),
+    priceSourceSnapshot: item.priceSourceSnapshot,
+  }));
 
-  const stats = [
-    {
-      label: "Total Products",
-      value: String(totalProducts),
-    },
-    {
-      label: "Orderable Products",
-      value: String(availableProductCount),
-    },
-    {
-      label: "Low Stock Products",
-      value: String(lowStockProducts),
-    },
-    {
-      label: "Out of Stock",
-      value: String(outOfStockProducts),
-    },
-  ];
+  const message = getMessage(params?.error, params?.success, params?.orderNumber, params?.products, params?.inquiryNumber);
 
   return (
-    <div>
-      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-500 sm:text-sm">
-            Dealer Portal
-          </p>
-
-          <h1 className="mt-2 text-2xl font-bold text-slate-950 sm:mt-3 sm:text-3xl md:text-5xl">
-            Place New Order
-          </h1>
-
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-slate-600 sm:mt-4 sm:text-sm sm:leading-6">
-            Select a product, enter required quantity, and submit your order.
-            The internal team will check stock, block stock, and move it toward
-            dispatch.
-          </p>
+    <div className="space-y-6">
+      <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#0d182a] sm:p-6 xl:p-7">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-blue-700 dark:border-blue-400/25 dark:bg-blue-500/10 dark:text-blue-300">Persistent dealer cart</span>
+            <h2 className="mt-3 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">Build your order</h2>
+            <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">Your cart is saved to your dealer account and resumes after logout or on another device. Current price, GST and stock are revalidated before ordering.</p>
+          </div>
+          <Link href="/dealer/orders" className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-700 transition hover:border-blue-200 hover:text-blue-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:border-blue-400/25 dark:hover:text-blue-300">Track My Orders</Link>
         </div>
-
-        <a
-          href="/dealer/orders"
-          className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-3 text-center text-sm font-bold text-slate-700 shadow-sm transition hover:border-cyan-300 hover:text-cyan-700 sm:w-auto"
-        >
-          View My Orders
-        </a>
-      </div>
-
-      {message && (
-        <div
-          className={`mt-8 rounded-2xl border px-5 py-4 text-sm font-semibold ${
-            message.type === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 xl:grid-cols-4">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6"
-          >
-            <p className="text-sm text-slate-500">{stat.label}</p>
-            <h2 className="mt-2 text-2xl font-bold text-slate-950 sm:mt-3 sm:text-3xl">
-              {stat.value}
-            </h2>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-8 grid gap-6 xl:grid-cols-[1fr_2fr]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
-          <h2 className="text-xl font-bold text-slate-950">Order Form</h2>
-
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            Only products with available stock can be selected for a new dealer
-            order.
-          </p>
-
-          <form action={createDealerOrderAction} className="mt-6 space-y-4">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Select Product
-              </label>
-
-              <div className="relative">
-                <select
-                  name="productId"
-                  className="h-14 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 px-4 pr-14 text-sm text-slate-950 outline-none transition focus:border-cyan-400 focus:bg-white"
-                  required
-                >
-                  <option value="">Select product</option>
-
-                  {availableProducts.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.code} - {product.name} - {product.stack} - Stock:{" "}
-                      {product.quantity}
-                    </option>
-                  ))}
-                </select>
-
-                <SelectArrow />
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Quantity
-              </label>
-
-              <input
-                name="quantity"
-                type="number"
-                min="1"
-                placeholder="Enter order quantity"
-                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 focus:bg-white"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Notes
-              </label>
-
-              <textarea
-                name="notes"
-                rows={4}
-                placeholder="Optional order note"
-                className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 focus:bg-white"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full rounded-2xl bg-cyan-400 px-5 py-3 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-cyan-300"
-            >
-              Submit Order
-            </button>
-          </form>
-        </div>
-
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-4 sm:p-6">
-            <h2 className="text-xl font-bold text-slate-950">
-              Available Products
-            </h2>
-            <p className="mt-2 text-sm text-slate-500">
-              This product list is loaded from the inventory database.
-            </p>
-          </div>
-
-          <div className="grid gap-3 p-4 lg:hidden">
-            {products.length === 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
-                No products found in inventory.
-              </div>
-            ) : (
-              products.map((product) => (
-                <article
-                  key={`mobile-${product.id}`}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-bold text-slate-950">
-                        {product.name}
-                      </h3>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {product.code}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`inline-flex shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-bold ${getProductStatusClass(
-                        product.status
-                      )}`}
-                    >
-                      {getProductStatusLabel(product.status)}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-3 gap-2">
-                    <div className="rounded-2xl bg-white p-3 shadow-sm">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Stack
-                      </p>
-                      <p className="mt-2 text-xs font-bold text-slate-950">
-                        {product.stack}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl bg-white p-3 shadow-sm">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Stock
-                      </p>
-                      <p className="mt-2 text-xs font-bold text-emerald-700">
-                        {product.quantity}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl bg-white p-3 shadow-sm">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                        Min
-                      </p>
-                      <p className="mt-2 text-xs font-bold text-slate-950">
-                        {product.minimumStock}
-                      </p>
-                    </div>
-                  </div>
-                </article>
-              ))
-            )}
-          </div>
-
-          <div className="hidden overflow-x-auto lg:block">
-            <table className="w-full min-w-[720px] table-fixed text-left text-sm">
-              <colgroup>
-                <col className="w-[38%]" />
-                <col className="w-[13%]" />
-                <col className="w-[14%]" />
-                <col className="w-[14%]" />
-                <col className="w-[21%]" />
-              </colgroup>
-
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-4 py-4 font-semibold">Product</th>
-                  <th className="px-4 py-4 font-semibold">Stack</th>
-                  <th className="px-4 py-4 font-semibold">Available</th>
-                  <th className="px-4 py-4 font-semibold">Minimum</th>
-                  <th className="px-4 py-4 font-semibold">Status</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-100">
-                {products.map((product) => (
-                  <tr key={product.id} className="text-slate-700">
-                    <td className="px-4 py-5">
-                      <div>
-                        <p className="break-words font-semibold text-slate-950">
-                          {product.name}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {product.code}
-                        </p>
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-5">{product.stack}</td>
-                    <td className="px-4 py-5">{product.quantity}</td>
-                    <td className="px-4 py-5">{product.minimumStock}</td>
-
-                    <td className="px-4 py-5">
-                      <span
-                        className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${getProductStatusClass(
-                          product.status
-                        )}`}
-                      >
-                        {getProductStatusLabel(product.status)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-
-                {products.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-10 text-center text-sm text-slate-500"
-                    >
-                      No products found in inventory.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-slate-950">
-          What happens after submitting?
-        </h2>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-4">
-          <div className="rounded-2xl bg-slate-50 p-5">
-            <p className="font-semibold text-cyan-700">1. New Order</p>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Your order is saved in the system with a unique order number.
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-slate-50 p-5">
-            <p className="font-semibold text-cyan-700">2. Stock Check</p>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Internal team checks product availability and stock location.
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-slate-50 p-5">
-            <p className="font-semibold text-cyan-700">3. Dispatch</p>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Dispatch team prepares the order for transport assignment.
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-slate-50 p-5">
-            <p className="font-semibold text-cyan-700">4. Delivery</p>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Transport team updates delivery status after assignment.
-            </p>
-          </div>
-        </div>
-      </div>
+        {message ? <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm font-bold ${message.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/25 dark:bg-rose-500/10 dark:text-rose-300"}`}>{message.text}</div> : null}
+      </section>
+      <DealerOrderBuilder
+        products={serializableProducts}
+        initialProductId={params?.product}
+        initialCart={initialCart}
+        initialCartVersion={savedCart?.version ?? 0}
+        initialNotes={savedCart?.notes ?? ""}
+        initialSavedAt={savedCart?.updatedAt.toISOString() ?? null}
+      />
     </div>
   );
 }

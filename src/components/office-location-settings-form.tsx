@@ -91,62 +91,62 @@ export function OfficeLocationSettingsForm({
   return (
     <form action={saveOfficeLocationAction} className="space-y-5">
       <div>
-        <label className="mb-2 block text-sm font-medium text-slate-300">
+        <label className="mb-2 block text-sm font-medium text-slate-600">
           Office Name
         </label>
         <input
           name="name"
           defaultValue={initialName}
-          className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition focus:border-cyan-300"
+          className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500"
           placeholder="Main Office"
           required
         />
       </div>
 
       <div>
-        <label className="mb-2 block text-sm font-medium text-slate-300">
+        <label className="mb-2 block text-sm font-medium text-slate-600">
           Address / Note
         </label>
         <input
           name="address"
           defaultValue={initialAddress ?? ""}
-          className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition focus:border-cyan-300"
+          className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500"
           placeholder="Office address or landmark"
         />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="mb-2 block text-sm font-medium text-slate-300">
+          <label className="mb-2 block text-sm font-medium text-slate-600">
             Latitude
           </label>
           <input
             name="latitude"
             value={latitude}
             onChange={(event) => setLatitude(event.target.value)}
-            className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition focus:border-cyan-300"
-            placeholder="Example: 26.9124"
+            className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500"
+            placeholder="Latitude"
             required
           />
         </div>
 
         <div>
-          <label className="mb-2 block text-sm font-medium text-slate-300">
+          <label className="mb-2 block text-sm font-medium text-slate-600">
             Longitude
           </label>
           <input
             name="longitude"
             value={longitude}
             onChange={(event) => setLongitude(event.target.value)}
-            className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition focus:border-cyan-300"
-            placeholder="Example: 75.7873"
+            className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500"
+            placeholder="Longitude"
             required
           />
         </div>
       </div>
 
       <div>
-        <label className="mb-2 block text-sm font-medium text-slate-300">
+        <label className="mb-2 block text-sm font-medium text-slate-600">
           Allowed Radius in Meters
         </label>
         <input
@@ -156,7 +156,7 @@ export function OfficeLocationSettingsForm({
           type="number"
           min="30"
           max="1000"
-          className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 text-sm outline-none transition focus:border-cyan-300"
+          className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500"
           required
         />
         <p className="mt-2 text-xs text-slate-500">
@@ -168,7 +168,7 @@ export function OfficeLocationSettingsForm({
         <button
           type="button"
           onClick={useCurrentLocation}
-          className="h-12 rounded-2xl border border-white/10 px-4 text-sm font-bold text-slate-200 transition hover:bg-white/[0.04]"
+          className="h-12 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
         >
           Use My Current Location
         </button>
@@ -176,14 +176,14 @@ export function OfficeLocationSettingsForm({
         <button
           type="button"
           onClick={testCurrentLocation}
-          className="h-12 rounded-2xl border border-cyan-300/30 bg-cyan-300/10 px-4 text-sm font-bold text-cyan-200 transition hover:bg-cyan-300/15"
+          className="h-12 rounded-2xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-50"
         >
           Test My Location
         </button>
       </div>
 
       {statusMessage ? (
-        <p className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
+        <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
           {statusMessage}
         </p>
       ) : null}
@@ -192,8 +192,8 @@ export function OfficeLocationSettingsForm({
         <div
           className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${
             testResult.insideOffice
-              ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
-              : "border-red-300/20 bg-red-300/10 text-red-200"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-red-200 bg-red-50 text-red-200"
           }`}
         >
           You are {testResult.distanceMeters}m from the saved office center. {testResult.insideOffice ? "Inside Office ✅" : "Outside Office ❌"}
@@ -205,7 +205,7 @@ export function OfficeLocationSettingsForm({
           href={mapHref}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex text-sm font-bold text-cyan-300 hover:text-cyan-200"
+          className="inline-flex text-sm font-bold text-blue-600 hover:text-blue-700"
         >
           Open location in Google Maps
         </a>
@@ -213,7 +213,7 @@ export function OfficeLocationSettingsForm({
 
       <button
         type="submit"
-        className="h-14 w-full rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+        className="h-14 w-full rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700"
       >
         Save Office Location
       </button>

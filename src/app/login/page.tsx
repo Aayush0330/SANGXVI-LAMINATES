@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 import { PasswordInput } from "@/components/password-input";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { prisma } from "@/lib/db";
 import { loginAction } from "./actions";
 
@@ -28,7 +30,7 @@ function getLoginMessage(error?: string) {
   if (error === "session-required") {
     return {
       type: "error",
-      text: "Please login to continue.",
+      text: "Sign in to continue.",
     };
   }
 
@@ -42,7 +44,7 @@ function getLoginMessage(error?: string) {
   if (error === "owner-already-exists") {
     return {
       type: "error",
-      text: "Owner setup is already completed. Please login with the owner account.",
+      text: "Owner setup is already completed. Sign in with the owner account.",
     };
   }
 
@@ -66,29 +68,30 @@ export default async function LoginPage({
   const hasOwner = ownerCount > 0;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.04] p-8 shadow-2xl shadow-black/30">
-        <p className="mb-2 text-sm font-semibold uppercase tracking-[0.25em] text-cyan-300">
-          Sangxvi ERP
-        </p>
+    <main className="relative flex min-h-screen items-center justify-center bg-slate-50 px-6 text-slate-950">
+      <div className="fixed right-5 top-5 z-20">
+        <ThemeToggle />
+      </div>
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm shadow-slate-200/70">
+        <div className="mb-5 flex items-center gap-3">
+          <BrandLogo priority />
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-blue-600">
+            Sanghvi ERP
+          </p>
+        </div>
 
-        <h1 className="text-3xl font-bold">Login to your account</h1>
-
-        <p className="mt-3 text-sm leading-6 text-slate-300">
-          Use your registered email and password to access the correct ERP
-          portal based on your assigned role.
-        </p>
+        <h1 className="text-3xl font-bold">ERP Login</h1>
 
         {!hasOwner && (
-          <div className="mt-6 rounded-2xl border border-yellow-300/20 bg-yellow-300/10 p-4 text-sm leading-6 text-yellow-100">
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
             <p className="font-bold">First owner is not configured</p>
             <p className="mt-1">
-              Create the real owner account before using the ERP.
+              Create the owner account to start using the ERP.
             </p>
 
             <Link
               href="/setup-owner"
-              className="mt-3 inline-flex rounded-xl bg-yellow-300 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-yellow-200"
+              className="mt-3 inline-flex rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-amber-600"
             >
               Create First Owner
             </Link>
@@ -99,8 +102,8 @@ export default async function LoginPage({
           <div
             className={`mt-6 rounded-2xl border px-4 py-3 text-sm font-semibold ${
               message.type === "error"
-                ? "border-red-300/20 bg-red-300/10 text-red-300"
-                : "border-emerald-300/20 bg-emerald-300/10 text-emerald-300"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
             }`}
           >
             {message.text}
@@ -109,16 +112,16 @@ export default async function LoginPage({
 
         <form action={loginAction} className="mt-8 space-y-5">
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-200">
+            <label className="mb-2 block text-sm font-medium text-slate-700">
               Email Address
             </label>
 
             <input
               name="email"
               type="email"
-              placeholder="owner@company.com"
+              placeholder="Email address"
               autoComplete="email"
-              className="h-14 w-full rounded-2xl border border-white/10 bg-slate-900 px-5 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-300"
+              className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-5 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500"
               required
             />
           </div>
@@ -126,27 +129,18 @@ export default async function LoginPage({
           <PasswordInput
             name="password"
             label="Password"
-            placeholder="Enter password"
+            placeholder="Password"
             autoComplete="current-password"
           />
 
           <button
             type="submit"
-            className="h-14 w-full rounded-2xl bg-cyan-300 px-4 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-14 w-full rounded-2xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={!hasOwner}
           >
-            Login
+            Sign In
           </button>
         </form>
-
-        {hasOwner ? (
-          <div className="mt-6 rounded-2xl border border-white/10 bg-slate-900/70 p-4 text-xs leading-5 text-slate-400">
-            <p className="font-bold text-slate-200">Private ERP access</p>
-            <p className="mt-1">
-              Only users created by the owner can login to this ERP.
-            </p>
-          </div>
-        ) : null}
       </div>
     </main>
   );

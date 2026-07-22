@@ -73,7 +73,7 @@ async function saveAttendanceAttempt({
   photoDataUrl: string | null;
 }) {
   await prisma.$executeRaw`
-    INSERT INTO "OfficeAttendanceAttempt" (
+    INSERT INTO public."OfficeAttendanceAttempt" (
       "id",
       "userId",
       "actionType",
@@ -128,7 +128,7 @@ async function saveAttendanceEvent({
   note: string;
 }) {
   await prisma.$executeRaw`
-    INSERT INTO "OfficeAttendanceEvent" (
+    INSERT INTO public."OfficeAttendanceEvent" (
       "id",
       "attendanceId",
       "userId",
@@ -175,7 +175,7 @@ function getSuccessQuery(actionType: AttendanceActionType) {
 export async function submitAttendancePunchAction(formData: FormData) {
   const currentUser = await getCurrentUser();
 
-  if (!canUseOfficeAttendance(currentUser.role)) {
+  if (!currentUser.roles.some((role) => canUseOfficeAttendance(role))) {
     redirect("/account/attendance?error=attendance-not-allowed");
   }
 
@@ -211,22 +211,30 @@ export async function submitAttendancePunchAction(formData: FormData) {
   }
 
   const office = await getActiveOfficeLocation();
+  const geofenceRequired = currentUser.geofenceMode === "OFFICE_REQUIRED";
 
-  if (!office || office.latitude === null || office.longitude === null) {
+  if (
+    geofenceRequired &&
+    (!office || office.latitude === null || office.longitude === null)
+  ) {
     redirect("/account/attendance?error=office-not-configured");
   }
 
-  const distanceMeters = calculateDistanceMeters(
-    office.latitude,
-    office.longitude,
-    latitude,
-    longitude
-  );
+  const distanceMeters =
+    office && office.latitude !== null && office.longitude !== null
+      ? calculateDistanceMeters(
+          office.latitude,
+          office.longitude,
+          latitude,
+          longitude,
+        )
+      : 0;
 
-  const insideGeofence = distanceMeters <= office.radiusMeters;
+  const insideGeofence =
+    !geofenceRequired || Boolean(office && distanceMeters <= office.radiusMeters);
   const actionLabel = getAttendanceActionLabel(actionType);
 
-  if (!insideGeofence) {
+  if (geofenceRequired && !insideGeofence && office) {
     const message = `Blocked ${actionLabel}. User was ${distanceMeters}m away from office. Allowed radius is ${office.radiusMeters}m.`;
 
     await saveAttendanceAttempt({
@@ -271,7 +279,7 @@ export async function submitAttendancePunchAction(formData: FormData) {
     const attendanceId = randomUUID();
 
     await prisma.$executeRaw`
-      INSERT INTO "OfficeAttendance" (
+      INSERT INTO public."OfficeAttendance" (
         "id",
         "userId",
         "workDate",
@@ -363,7 +371,7 @@ export async function submitAttendancePunchAction(formData: FormData) {
     }
 
     await prisma.$executeRaw`
-      UPDATE "OfficeAttendance"
+      UPDATE public."OfficeAttendance"
       SET
         "status" = ${getBreakStatusFromType(breakType)},
         "currentBreakType" = ${breakType},
@@ -418,7 +426,7 @@ export async function submitAttendancePunchAction(formData: FormData) {
     }
 
     await prisma.$executeRaw`
-      UPDATE "OfficeAttendance"
+      UPDATE public."OfficeAttendance"
       SET
         "status" = 'PUNCHED_IN',
         "breakMinutes" = "breakMinutes" + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "currentBreakStartedAt")) / 60)::int),
@@ -475,7 +483,7 @@ export async function submitAttendancePunchAction(formData: FormData) {
   }
 
   await prisma.$executeRaw`
-    UPDATE "OfficeAttendance"
+    UPDATE public."OfficeAttendance"
     SET
       "status" = 'COMPLETED',
       "punchOutAt" = CURRENT_TIMESTAMP,

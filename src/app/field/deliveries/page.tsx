@@ -1,6 +1,17 @@
 import { AccessDeniedCard } from "@/components/access-denied-card";
 import { OrderStatusTimeline } from "@/components/order-status-timeline";
+import {
+  DriverProofOptions,
+  DRIVER_DELIVERY_SCROLL_KEY,
+  MarkDeliveredForm,
+  MarkOnTheWayForm,
+} from "@/components/driver-delivery-actions";
+import {
+  TeamFeedbackToast,
+  type TeamFeedbackMessage,
+} from "@/components/team-feedback-toast";
 import { checkPermission } from "@/lib/auth-guards";
+import { getPortalLandingLabel, getPortalLandingPath } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
 import { getOrderStatusHistoryMap } from "@/lib/order-status-history";
 import {
@@ -9,17 +20,15 @@ import {
   getOrderFulfillmentSummary,
   getOrderStatusLabel,
 } from "@/lib/order-fulfillment";
-import {
-  markDeliveredAction,
-  markOnTheWayAction,
-  uploadSignedInvoiceProofAction,
-} from "./actions";
+
 
 type DeliveryProofRow = {
   id: string;
   orderId: string;
   uploadedByName: string | null;
   proofType: string;
+  uploadMode: string;
+  deliveredByName: string | null;
   fileName: string;
   mimeType: string;
   note: string | null;
@@ -35,116 +44,67 @@ function formatDate(date: Date) {
   }).format(date);
 }
 
-function getDeliveryMessage(error?: string, success?: string) {
-  if (success === "on-the-way") {
-    return {
+function getDeliveryMessage(
+  error?: string,
+  success?: string,
+): TeamFeedbackMessage | null {
+  const successMessages: Record<string, TeamFeedbackMessage> = {
+    "on-the-way": {
       type: "success",
-      text: "Delivery marked as On The Way.",
-    };
-  }
-
-  if (success === "delivered") {
-    return {
+      title: "Delivery started",
+      text: "The order is now marked as On The Way.",
+    },
+    delivered: {
       type: "success",
-      text: "Order marked as Delivered successfully.",
-    };
-  }
-
-  if (success === "partially-delivered") {
-    return {
+      title: "Delivery completed",
+      text: "Now upload proof yourself or ask your manager for help.",
+    },
+    "proof-uploaded": {
       type: "success",
-      text: "Blocked quantity delivered. Remaining quantity is now pending for the next fulfilment cycle.",
-    };
-  }
-
-  if (success === "proof-uploaded") {
-    return {
+      title: "Delivery proof uploaded",
+      text: "The signed proof and uploader details were saved successfully.",
+    },
+    "proof-help-requested": {
       type: "success",
-      text: "Signed duplicate invoice proof uploaded successfully.",
-    };
+      title: "Manager request sent",
+      text: "Your manager can now upload the delivery proof on your behalf.",
+    },
+    "proof-help-cancelled": {
+      type: "success",
+      title: "Manager request cancelled",
+      text: "The assistance request was closed. You can upload the proof yourself when ready.",
+    },
+  };
+
+  const errorMessages: Record<string, string> = {
+    "permission-denied": "You do not have permission to update delivery status.",
+    "missing-order": "The order reference is missing.",
+    "driver-not-found": "Your driver account was not found.",
+    "order-not-found": "The selected order was not found.",
+    "not-your-delivery": "This delivery is not assigned to your account.",
+    "invalid-status": "This action is not allowed for the current delivery status.",
+    "complete-quantity-required":
+      "The complete ordered quantity must be reserved and ready before delivery can be completed.",
+    "missing-proof": "Choose a signed delivery proof photo or PDF.",
+    "invalid-proof-type": "Only JPG, PNG, WebP, or PDF files are allowed.",
+    "proof-too-large": "The proof file must be 3MB or smaller.",
+    "invalid-proof-content": "The selected file content does not match its file type.",
+    "proof-note-too-long": "The note must be 500 characters or less.",
+    "proof-not-allowed": "Proof can be added only after delivery is completed.",
+    "proof-already-uploaded": "Delivery proof is already uploaded for this order.",
+    "proof-help-already-requested": "A manager assistance request is already pending for this order.",
+    "proof-help-not-requested": "There is no pending manager assistance request to cancel.",
+  };
+
+  if (success && successMessages[success]) {
+    return successMessages[success];
   }
 
-  if (error === "permission-denied") {
+  if (error && errorMessages[error]) {
     return {
       type: "error",
-      text: "You do not have permission to update delivery status.",
-    };
-  }
-
-  if (error === "missing-order") {
-    return {
-      type: "error",
-      text: "Order id is missing.",
-    };
-  }
-
-  if (error === "driver-not-found") {
-    return {
-      type: "error",
-      text: "Driver account was not found in the database.",
-    };
-  }
-
-  if (error === "order-not-found") {
-    return {
-      type: "error",
-      text: "Selected order was not found in the database.",
-    };
-  }
-
-  if (error === "not-your-delivery") {
-    return {
-      type: "error",
-      text: "This delivery is not assigned to your account.",
-    };
-  }
-
-  if (error === "invalid-status") {
-    return {
-      type: "error",
-      text: "This action is not allowed for the current delivery status.",
-    };
-  }
-
-  if (error === "missing-proof") {
-    return {
-      type: "error",
-      text: "Please upload the signed duplicate invoice photo or PDF.",
-    };
-  }
-
-  if (error === "invalid-proof-type") {
-    return {
-      type: "error",
-      text: "Only JPG, PNG, WebP, or PDF proof files are allowed.",
-    };
-  }
-
-  if (error === "proof-too-large") {
-    return {
-      type: "error",
-      text: "Proof file is too large. Please upload a file up to 3MB.",
-    };
-  }
-
-  if (error === "invalid-proof-content") {
-    return {
-      type: "error",
-      text: "The uploaded file content does not match its file type.",
-    };
-  }
-
-  if (error === "proof-note-too-long") {
-    return {
-      type: "error",
-      text: "Proof note must be 500 characters or less.",
-    };
-  }
-
-  if (error === "proof-not-allowed") {
-    return {
-      type: "error",
-      text: "Signed invoice proof can be uploaded only after delivery is completed.",
+      title: "Delivery action failed",
+      text: errorMessages[error],
     };
   }
 
@@ -171,8 +131,8 @@ export default async function FieldDeliveriesPage({
       <AccessDeniedCard
         title="Delivery Access Denied"
         description="Your current role does not have permission to view assigned deliveries."
-        backHref="/field/dashboard"
-        backLabel="Go to Dashboard"
+        backHref={getPortalLandingPath(currentUser.role)}
+        backLabel={getPortalLandingLabel(currentUser.role)}
       />
     );
   }
@@ -188,8 +148,8 @@ export default async function FieldDeliveriesPage({
       <AccessDeniedCard
         title="Driver Account Not Found"
         description="Your driver account was not found in the database."
-        backHref="/field/dashboard"
-        backLabel="Go to Dashboard"
+        backHref={getPortalLandingPath(currentUser.role)}
+        backLabel={getPortalLandingLabel(currentUser.role)}
       />
     );
   }
@@ -198,7 +158,7 @@ export default async function FieldDeliveriesPage({
     where: {
       assignedDriverId: driver.id,
       status: {
-        in: ["TRANSPORT_ASSIGNED", "ON_THE_WAY", "PARTIALLY_DELIVERED", "DELIVERED", "INVOICE_UPLOADED"],
+        in: ["TRANSPORT_ASSIGNED", "ON_THE_WAY", "DELIVERED", "INVOICE_UPLOADED"],
       },
     },
     include: {
@@ -231,13 +191,16 @@ export default async function FieldDeliveriesPage({
               dp."orderId",
               uploader."name" AS "uploadedByName",
               dp."proofType",
+              dp."uploadMode",
+              dp."deliveredByName",
               dp."fileName",
               dp."mimeType",
               dp."note",
               dp."uploadedAt"
-            FROM "DeliveryProof" dp
-            LEFT JOIN "User" uploader ON uploader."id" = dp."uploadedById"
+            FROM public."DeliveryProof" dp
+            LEFT JOIN public."User" uploader ON uploader."id" = dp."uploadedById"
             WHERE dp."orderId" IN (${orderIds.map((_, index) => `$${index + 1}`).join(", ")})
+              AND dp."isActive" = TRUE
             ORDER BY dp."uploadedAt" DESC
           `,
           ...orderIds,
@@ -293,75 +256,59 @@ export default async function FieldDeliveriesPage({
     <div>
       <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-300 sm:text-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-600 sm:text-sm">
             Field Portal
           </p>
 
-          <h1 className="mt-2 text-2xl font-bold text-white sm:mt-3 sm:text-3xl md:text-5xl">
+          <h1 className="mt-2 text-2xl font-bold text-slate-950 sm:mt-3 sm:text-3xl md:text-5xl">
             My Deliveries
           </h1>
-
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-slate-300 sm:mt-4 sm:text-sm sm:leading-6">
-            Deliver the currently blocked quantity. Remaining quantity will stay
-            pending for the next dispatch cycle.
-          </p>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-slate-200">
-          Driver: <span className="text-white">{driver.name}</span>
+        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700">
+          Driver: <span className="text-slate-950">{driver.name}</span>
         </div>
       </div>
 
-      {message && (
-        <div
-          className={`mt-8 rounded-2xl border px-5 py-4 text-sm font-semibold ${
-            message.type === "success"
-              ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-300"
-              : "border-red-300/20 bg-red-300/10 text-red-300"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
+      <TeamFeedbackToast
+        message={message}
+        restoreScrollKey={DRIVER_DELIVERY_SCROLL_KEY}
+      />
 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 xl:grid-cols-4">
         {stats.map((stat) => (
           <div
             key={stat.label}
-            className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:rounded-3xl sm:p-6"
+            className="rounded-2xl border border-slate-200 bg-white p-4 sm:rounded-2xl sm:p-6"
           >
-            <p className="text-sm text-slate-400">{stat.label}</p>
-            <h2 className="mt-2 text-2xl font-bold text-white sm:mt-3 sm:text-3xl">
+            <p className="text-sm text-slate-500">{stat.label}</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950 sm:mt-3 sm:text-3xl">
               {stat.value}
             </h2>
           </div>
         ))}
       </div>
 
-      <div className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
-        <div className="border-b border-white/10 p-4 sm:p-6">
-          <h2 className="text-xl font-bold text-white">
+      <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 p-4 sm:p-6">
+          <h2 className="text-xl font-bold text-slate-950">
             Assigned Delivery Orders
           </h2>
 
-          <p className="mt-2 text-sm text-slate-400">
+          <p className="mt-2 text-sm text-slate-500">
             This list shows only orders assigned to your driver account.
           </p>
         </div>
 
         {ordersWithHistory.length === 0 ? (
           <div className="p-6 text-center sm:p-10">
-            <h3 className="text-lg font-bold text-white">
+            <h3 className="text-lg font-bold text-slate-950">
               No deliveries assigned
             </h3>
 
-            <p className="mt-2 text-sm text-slate-400">
-              Assigned delivery orders will appear here after dispatch assigns
-              transport.
-            </p>
           </div>
         ) : (
-          <div className="divide-y divide-white/10">
+          <div className="divide-y divide-slate-100">
             {ordersWithHistory.map((order) => {
               const summary = getOrderFulfillmentSummary(order.items);
 
@@ -370,7 +317,7 @@ export default async function FieldDeliveriesPage({
                   <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                     <div>
                       <div className="flex flex-wrap items-center gap-3">
-                        <h3 className="text-xl font-bold text-white">
+                        <h3 className="text-xl font-bold text-slate-950">
                           {order.orderNumber}
                         </h3>
 
@@ -383,9 +330,9 @@ export default async function FieldDeliveriesPage({
                         </span>
                       </div>
 
-                      <p className="mt-2 text-sm text-slate-400">
+                      <p className="mt-2 text-sm text-slate-500">
                         Dealer:{" "}
-                        <span className="font-semibold text-slate-200">
+                        <span className="font-semibold text-slate-700">
                           {order.dealer.name}
                         </span>{" "}
                         · {order.dealer.email}
@@ -401,38 +348,38 @@ export default async function FieldDeliveriesPage({
                       </p>
 
                       {order.notes && (
-                        <p className="mt-4 max-w-2xl rounded-2xl bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-300">
+                        <p className="mt-4 max-w-2xl rounded-2xl bg-white px-4 py-3 text-sm leading-6 text-slate-600">
                           {order.notes}
                         </p>
                       )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
-                        <p className="text-xs text-slate-500">Requested</p>
-                        <p className="mt-1 text-lg font-bold text-white">
+                      <div className="rounded-2xl bg-white px-4 py-3">
+                        <p className="text-xs text-slate-500">Ordered</p>
+                        <p className="mt-1 text-lg font-bold text-slate-950">
                           {summary.requested}
                         </p>
                       </div>
 
-                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
+                      <div className="rounded-2xl bg-white px-4 py-3">
                         <p className="text-xs text-slate-500">To Deliver</p>
-                        <p className="mt-1 text-lg font-bold text-cyan-300">
+                        <p className="mt-1 text-lg font-bold text-blue-600">
                           {summary.blocked}
                         </p>
                       </div>
 
-                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
+                      <div className="rounded-2xl bg-white px-4 py-3">
                         <p className="text-xs text-slate-500">Delivered</p>
-                        <p className="mt-1 text-lg font-bold text-emerald-300">
+                        <p className="mt-1 text-lg font-bold text-emerald-700">
                           {summary.delivered}
                         </p>
                       </div>
 
-                      <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
-                        <p className="text-xs text-slate-500">Pending</p>
-                        <p className="mt-1 text-lg font-bold text-yellow-300">
-                          {summary.pending}
+                      <div className="rounded-2xl bg-white px-4 py-3">
+                        <p className="text-xs text-slate-500">Product Lines</p>
+                        <p className="mt-1 text-lg font-bold text-slate-950">
+                          {order.items.length}
                         </p>
                       </div>
                     </div>
@@ -445,10 +392,10 @@ export default async function FieldDeliveriesPage({
                       return (
                         <article
                           key={`mobile-item-${item.id}`}
-                          className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
                         >
                           <div className="min-w-0">
-                            <h4 className="truncate text-sm font-bold text-white">
+                            <h4 className="truncate text-sm font-bold text-slate-950">
                               {item.product.name}
                             </h4>
                             <p className="mt-1 text-xs text-slate-500">
@@ -457,39 +404,43 @@ export default async function FieldDeliveriesPage({
                           </div>
 
                           <div className="mt-4 grid grid-cols-2 gap-2 min-[420px]:grid-cols-4">
-                            <div className="rounded-xl bg-white/[0.04] p-2">
+                            <div className="rounded-xl bg-white p-2">
                               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                                 Dealer Req
                               </p>
-                              <p className="mt-1 text-xs font-bold text-slate-300">
+                              <p className="mt-1 text-xs font-bold text-slate-600">
                                 {itemSummary.requested}
                               </p>
                             </div>
 
-                            <div className="rounded-xl bg-white/[0.04] p-2">
+                            <div className="rounded-xl bg-white p-2">
                               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                                 Deliver
                               </p>
-                              <p className="mt-1 text-xs font-bold text-cyan-300">
+                              <p className="mt-1 text-xs font-bold text-blue-600">
                                 {itemSummary.blocked}
                               </p>
                             </div>
 
-                            <div className="rounded-xl bg-white/[0.04] p-2">
+                            <div className="rounded-xl bg-white p-2">
                               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                                 Done
                               </p>
-                              <p className="mt-1 text-xs font-bold text-emerald-300">
+                              <p className="mt-1 text-xs font-bold text-emerald-700">
                                 {itemSummary.delivered}
                               </p>
                             </div>
 
-                            <div className="rounded-xl bg-white/[0.04] p-2">
+                            <div className="rounded-xl bg-white p-2">
                               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-                                Pending
+                                State
                               </p>
-                              <p className="mt-1 text-xs font-bold text-yellow-300">
-                                {itemSummary.pending}
+                              <p className="mt-1 text-xs font-bold text-slate-700">
+                                {itemSummary.isFullyDelivered
+                                  ? "Delivered"
+                                  : itemSummary.isFullyReserved
+                                    ? "Ready"
+                                    : "Blocked"}
                               </p>
                             </div>
                           </div>
@@ -498,18 +449,17 @@ export default async function FieldDeliveriesPage({
                     })}
                   </div>
 
-                  <div className="mt-5 hidden overflow-x-auto rounded-2xl border border-white/10 lg:block">
-                    <table className="w-full min-w-[760px] table-fixed text-left text-sm">
+                  <div className="mt-5 hidden overflow-x-auto rounded-2xl border border-slate-200 lg:block">
+                    <table className="w-full min-w-[660px] table-fixed text-left text-sm">
                       <colgroup>
-                        <col className="w-[36%]" />
-                        <col className="w-[12%]" />
-                        <col className="w-[13%]" />
-                        <col className="w-[13%]" />
-                        <col className="w-[13%]" />
-                        <col className="w-[13%]" />
+                        <col className="w-[40%]" />
+                        <col className="w-[15%]" />
+                        <col className="w-[15%]" />
+                        <col className="w-[15%]" />
+                        <col className="w-[15%]" />
                       </colgroup>
 
-                      <thead className="bg-white/[0.04] text-slate-300">
+                      <thead className="bg-white text-slate-600">
                         <tr>
                           <th className="px-4 py-3 font-semibold">Product</th>
                           <th className="px-4 py-3 font-semibold">Stack</th>
@@ -522,18 +472,17 @@ export default async function FieldDeliveriesPage({
                           <th className="px-4 py-3 font-semibold">
                             Delivered
                           </th>
-                          <th className="px-4 py-3 font-semibold">Pending</th>
                         </tr>
                       </thead>
 
-                      <tbody className="divide-y divide-white/10">
+                      <tbody className="divide-y divide-slate-100">
                         {order.items.map((item) => {
                           const itemSummary = getItemFulfillmentSummary(item);
 
                           return (
-                            <tr key={item.id} className="text-slate-300">
+                            <tr key={item.id} className="text-slate-600">
                               <td className="px-4 py-4">
-                                <p className="break-words font-semibold text-white">
+                                <p className="break-words font-semibold text-slate-950">
                                   {item.product.name}
                                 </p>
 
@@ -558,9 +507,6 @@ export default async function FieldDeliveriesPage({
                                 {itemSummary.delivered}
                               </td>
 
-                              <td className="px-4 py-4">
-                                {itemSummary.pending}
-                              </td>
                             </tr>
                           );
                         })}
@@ -569,61 +515,53 @@ export default async function FieldDeliveriesPage({
                   </div>
 
 
-                  {(order.deliveryProofs.length > 0 || ["PARTIALLY_DELIVERED", "DELIVERED", "INVOICE_UPLOADED"].includes(order.status)) && (
-                    <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.06] p-4">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  {(order.deliveryProofs.length > 0 || ["DELIVERED", "INVOICE_UPLOADED"].includes(order.status)) && (
+                    <div className="mt-5 rounded-[24px] border border-blue-100 bg-blue-50/60 p-4 dark:border-slate-700 dark:bg-slate-900/70 sm:p-5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <h4 className="text-sm font-bold text-cyan-200">
-                            Signed Duplicate Invoice Proof
+                          <h4 className="text-base font-black text-slate-950 dark:text-white">
+                            Delivery Proof
                           </h4>
-                          <p className="mt-1 text-xs leading-5 text-slate-400">
-                            Upload the signed duplicate invoice after delivery. Image or PDF up to 3MB.
+                          <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-300">
+                            Upload it yourself, or ask your manager to upload it for you.
                           </p>
                         </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.signedInvoiceStatus === "UPLOADED" ? "bg-emerald-300/10 text-emerald-300" : "bg-yellow-300/10 text-yellow-300"}`}>
-                          {order.signedInvoiceStatus === "UPLOADED" ? "Uploaded" : "Pending"}
+                        <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${order.signedInvoiceStatus === "UPLOADED" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-1 dark:ring-emerald-400/20" : order.deliveryProofAssistanceStatus === "REQUESTED" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-1 dark:ring-violet-400/20" : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-1 dark:ring-amber-400/20"}`}>
+                          {order.signedInvoiceStatus === "UPLOADED"
+                            ? "Proof Uploaded"
+                            : order.deliveryProofAssistanceStatus === "REQUESTED"
+                              ? "Manager Help Requested"
+                              : "Proof Pending"}
                         </span>
                       </div>
 
-                      {order.deliveryProofs.length > 0 && (
+                      {order.deliveryProofs.length > 0 ? (
                         <div className="mt-4 grid gap-3">
                           {order.deliveryProofs.map((proof) => (
-                            <div key={proof.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-3">
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div key={proof.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950/70">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
-                                  <p className="text-sm font-bold text-white">{proof.fileName}</p>
-                                  <p className="mt-1 text-xs text-slate-500">
-                                    Uploaded by {proof.uploadedByName || "Driver"} · {formatDate(new Date(proof.uploadedAt))}
+                                  <p className="text-sm font-black text-slate-950 dark:text-white">{proof.fileName}</p>
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    Delivered by {proof.deliveredByName || order.deliveredByName || order.assignedDriver?.name || driver.name}
                                   </p>
-                                  {proof.note && <p className="mt-2 text-xs leading-5 text-slate-300">{proof.note}</p>}
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    Uploaded by {proof.uploadedByName || "Driver"} · {proof.uploadMode === "MANAGER_ASSISTED" ? "Manager Assisted" : "Driver Self Upload"} · {formatDate(new Date(proof.uploadedAt))}
+                                  </p>
+                                  {proof.note ? <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">{proof.note}</p> : null}
                                 </div>
-                                <a href={`/field/deliveries/proof/${proof.id}`} target="_blank" rel="noreferrer" className="rounded-2xl border border-cyan-300/30 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-300 hover:text-slate-950">
+                                <a href={`/field/deliveries/proof/${proof.id}`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-blue-200 px-4 text-xs font-black text-blue-600 transition hover:bg-blue-600 hover:text-white dark:border-blue-400/30 dark:text-blue-300 dark:hover:bg-blue-500 dark:hover:text-white">
                                   View Proof
                                 </a>
                               </div>
                             </div>
                           ))}
                         </div>
-                      )}
-
-                      {["PARTIALLY_DELIVERED", "DELIVERED", "INVOICE_UPLOADED"].includes(order.status) && (
-                        <form action={uploadSignedInvoiceProofAction} className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
-                          <input type="hidden" name="orderId" value={order.id} />
-
-                          <label className="block">
-                            <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Proof File</span>
-                            <input name="signedInvoice" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-2 block w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-xl file:border-0 file:bg-cyan-300 file:px-3 file:py-2 file:text-xs file:font-bold file:text-slate-950" required />
-                          </label>
-
-                          <label className="block">
-                            <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Note</span>
-                            <input name="note" placeholder="Signed by dealer / receiver" className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300" />
-                          </label>
-
-                          <button type="submit" className="h-12 rounded-2xl bg-cyan-300 px-5 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-                            Upload Proof
-                          </button>
-                        </form>
+                      ) : (
+                        <DriverProofOptions
+                          orderId={order.id}
+                          assistanceRequested={order.deliveryProofAssistanceStatus === "REQUESTED"}
+                        />
                       )}
                     </div>
                   )}
@@ -631,41 +569,17 @@ export default async function FieldDeliveriesPage({
                   <OrderStatusTimeline history={order.statusHistory} />
 
                   <div className="mt-5 flex flex-wrap gap-3">
-                    {order.status === "TRANSPORT_ASSIGNED" && (
-                      <form action={markOnTheWayAction}>
-                        <input type="hidden" name="orderId" value={order.id} />
+                    {order.status === "TRANSPORT_ASSIGNED" ? (
+                      <MarkOnTheWayForm orderId={order.id} />
+                    ) : null}
 
-                        <button
-                          type="submit"
-                          className="rounded-2xl bg-orange-400 px-5 py-3 text-sm font-bold text-white transition hover:bg-orange-300"
-                        >
-                          Mark On The Way
-                        </button>
-                      </form>
-                    )}
-
-                    {order.status === "ON_THE_WAY" && (
-                      <form action={markDeliveredAction}>
-                        <input type="hidden" name="orderId" value={order.id} />
-
-                        <button
-                          type="submit"
-                          className="rounded-2xl bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"
-                        >
-                          Mark Delivered
-                        </button>
-                      </form>
-                    )}
+                    {order.status === "ON_THE_WAY" ? (
+                      <MarkDeliveredForm orderId={order.id} />
+                    ) : null}
 
                     {["DELIVERED", "INVOICE_UPLOADED"].includes(order.status) && (
-                      <div className="rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-5 py-3 text-sm font-semibold text-emerald-300">
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
                         Delivery completed successfully.
-                      </div>
-                    )}
-
-                    {order.status === "PARTIALLY_DELIVERED" && (
-                      <div className="rounded-2xl border border-teal-300/20 bg-teal-300/10 px-5 py-3 text-sm font-semibold text-teal-300">
-                        Partial delivery completed. Upload signed duplicate invoice proof for delivered quantity.
                       </div>
                     )}
                   </div>

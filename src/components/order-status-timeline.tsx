@@ -47,8 +47,8 @@ function TimelineRows({
                 className={`mt-1 h-3 w-3 rounded-full ring-4 ${
                   isLast
                     ? isLight
-                      ? "bg-cyan-500 ring-cyan-100"
-                      : "bg-cyan-300 ring-cyan-300/10"
+                      ? "bg-blue-600 ring-blue-100"
+                      : "bg-blue-600 ring-cyan-300/10"
                     : isLight
                     ? "bg-slate-400 ring-slate-100"
                     : "bg-slate-500 ring-white/5"
@@ -68,7 +68,7 @@ function TimelineRows({
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <p
                   className={`text-sm font-extrabold ${
-                    isLight ? "text-slate-950" : "text-white"
+                    isLight ? "text-slate-950" : "text-slate-950"
                   }`}
                 >
                   {item.title}
@@ -76,7 +76,7 @@ function TimelineRows({
 
                 <p
                   className={`text-[11px] font-bold ${
-                    isLight ? "text-slate-500" : "text-slate-400"
+                    isLight ? "text-slate-500" : "text-slate-500"
                   }`}
                 >
                   {formatTimelineDate(item.createdAt)}
@@ -85,7 +85,7 @@ function TimelineRows({
 
               <p
                 className={`mt-1 text-xs font-semibold ${
-                  isLight ? "text-slate-600" : "text-slate-300"
+                  isLight ? "text-slate-600" : "text-slate-600"
                 }`}
               >
                 {getOrderStatusLabel(item.fromStatus)} →{" "}
@@ -95,7 +95,7 @@ function TimelineRows({
               {item.description ? (
                 <p
                   className={`mt-2 text-xs leading-5 ${
-                    isLight ? "text-slate-700" : "text-slate-300"
+                    isLight ? "text-slate-700" : "text-slate-600"
                   }`}
                 >
                   {item.description}
@@ -134,10 +134,10 @@ export function OrderStatusTimeline({
         className={`mt-5 rounded-2xl border px-4 py-3 text-xs font-semibold ${
           isLight
             ? "border-slate-200 bg-slate-50 text-slate-700"
-            : "border-white/10 bg-white/[0.04] text-slate-400"
+            : "border-slate-200 bg-white text-slate-500"
         }`}
       >
-        Status timeline will appear here for new order updates.
+        No status updates yet.
       </div>
     );
   }
@@ -152,14 +152,14 @@ export function OrderStatusTimeline({
       className={`mt-5 rounded-2xl border p-4 sm:p-5 ${
         isLight
           ? "border-slate-200 bg-slate-50 text-slate-950"
-          : "border-white/10 bg-white/[0.04] text-white"
+          : "border-slate-200 bg-white text-slate-950"
       }`}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h4
             className={`text-sm font-extrabold ${
-              isLight ? "text-slate-950" : "text-white"
+              isLight ? "text-slate-950" : "text-slate-950"
             }`}
           >
             Status Timeline
@@ -167,7 +167,7 @@ export function OrderStatusTimeline({
 
           <p
             className={`mt-1 text-xs font-semibold ${
-              isLight ? "text-slate-500" : "text-slate-400"
+              isLight ? "text-slate-500" : "text-slate-500"
             }`}
           >
             Latest: {latestItem.title}
@@ -177,8 +177,8 @@ export function OrderStatusTimeline({
         <span
           className={`w-fit rounded-full px-3 py-1 text-[11px] font-extrabold ${
             isLight
-              ? "bg-cyan-100 text-cyan-700 ring-1 ring-cyan-200"
-              : "bg-cyan-300/15 text-cyan-200 ring-1 ring-cyan-300/20"
+              ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100"
+              : "bg-blue-50 text-blue-700 ring-1 ring-blue-100"
           }`}
         >
           {history.length} updates
@@ -191,7 +191,7 @@ export function OrderStatusTimeline({
             className={`flex cursor-pointer list-none items-center justify-between rounded-2xl border px-4 py-3 text-xs font-bold transition ${
               isLight
                 ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-                : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
             }`}
           >
             <span>Show older updates ({olderItems.length})</span>
@@ -203,7 +203,7 @@ export function OrderStatusTimeline({
             className={`mt-4 max-h-[360px] overflow-y-auto rounded-2xl border p-4 ${
               isLight
                 ? "border-slate-200 bg-white"
-                : "border-white/10 bg-slate-950/30"
+                : "border-slate-200 bg-slate-50/30"
             }`}
           >
             <TimelineRows items={olderItems} isLight={isLight} />

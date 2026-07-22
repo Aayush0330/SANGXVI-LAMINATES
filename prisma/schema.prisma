@@ -11,8 +11,8 @@ enum UserRole {
   OWNER
   MANAGER
   ACCOUNTANT
-  INVENTORY_TEAM
   DISPATCH_TEAM
+  ORDER_TEAM
   QC_TEAM
   DRIVER_TRANSPORT
   COLLECTION_TEAM
@@ -23,6 +23,12 @@ enum UserRole {
 enum UserStatus {
   ACTIVE
   INACTIVE
+  FORMER_EMPLOYEE
+}
+
+enum GeofenceMode {
+  OFFICE_REQUIRED
+  ANYWHERE
 }
 
 enum ProductStatus {
@@ -31,22 +37,201 @@ enum ProductStatus {
   OUT_OF_STOCK
 }
 
+enum InventoryInquiryStatus {
+  NEW_INQUIRY
+  FOLLOW_UP
+  ORDER_PLACED
+  NOT_IN_STOCK
+  MISSED_SALE
+  CLOSED
+}
+
+enum FieldVisitStatus {
+  VISIT_REPORTED
+  GOAL_ACHIEVED
+  GOAL_PENDING
+  FOLLOW_UP_REQUIRED
+  CLOSED
+}
+
+enum CollectionStatus {
+  ASSIGNED
+  ON_THE_WAY
+  REACHED
+  PARTIALLY_COLLECTED
+  COLLECTED
+  FAILED
+  RESCHEDULED
+  VERIFIED
+  CANCELLED
+}
+
+enum CollectionPaymentMode {
+  CASH
+  CHEQUE
+  UPI
+  BANK_TRANSFER
+  OWNER_COLLECTED
+  OTHER
+}
+
+enum AttendanceRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum AttendanceLeaveType {
+  FULL_DAY
+  HALF_DAY
+  PAID
+  UNPAID
+  EMERGENCY
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+  TEMPORARY
+}
+
+enum EmployeeLifecycleType {
+  JOINED
+  PROFILE_UPDATED
+  TRANSFERRED
+  PROMOTED
+  STATUS_CHANGED
+  EXITED
+  REACTIVATED
+  NOTE
+}
+
+enum PayrollPaymentStatus {
+  PENDING
+  PROCESSING
+  PAID
+  ON_HOLD
+  FAILED
+}
+
+enum WorkTeamMemberRole {
+  LEAD
+  MEMBER
+}
+
+enum WorkTeamType {
+  GENERAL
+  PHYSICAL_DISPATCH
+}
+
+enum PhysicalCheckStatus {
+  ASSIGNED
+  IN_PROGRESS
+  READY_FOR_QC
+  ISSUE_REPORTED
+  QC_REWORK
+  COMPLETED
+  CANCELLED
+}
+
+enum PhysicalCheckIssueType {
+  SHORT_QUANTITY
+  DAMAGED_PRODUCT
+  WRONG_PRODUCT
+  QUANTITY_MISMATCH
+  PRODUCT_UNAVAILABLE
+  OTHER
+}
+
+enum WorkTaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum WorkTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+  CRITICAL
+}
+
+enum OrderSource {
+  DEALER_PORTAL
+  WALK_IN
+  PHONE
+  WHATSAPP
+  MANUAL_ENTRY
+  SALES_FIELD
+}
+
+enum OrderItemPriceSource {
+  DEALER_PRICE
+  SELLING_PRICE
+  MANUAL_PRICE
+  LEGACY_BACKFILL
+}
+
+
+enum PurchaseRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  ORDERED
+  IN_TRANSIT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum PurchaseRequestPriority {
+  NORMAL
+  HIGH
+  URGENT
+}
+
 enum OrderStatus {
   NEW_ORDER
+  PENDING_TEAM_ASSIGNMENT
+  PHYSICAL_CHECK_ASSIGNED
+  PHYSICAL_CHECK_IN_PROGRESS
+  PHYSICAL_CHECK_ISSUE
+  QC_REWORK
+  PENDING_STOCK_CHECK
   STOCK_CHECKED
   STOCK_BLOCKED
-  PARTIALLY_BLOCKED
   BACKORDERED
+  PENDING_QC
   READY_FOR_DISPATCH
   QC_APPROVED
   CANCELLATION_REQUESTED
   TRANSPORT_ASSIGNED
   ON_THE_WAY
-  PARTIALLY_DELIVERED
   DELIVERED
   INVOICE_UPLOADED
-  PARTIALLY_CANCELLED
   CANCELLED
+}
+
+enum DeliveryProofAssistanceStatus {
+  NOT_REQUESTED
+  REQUESTED
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliveryProofUploadMode {
+  DRIVER_SELF
+  MANAGER_ASSISTED
+  INTERNAL_UPLOAD
 }
 
 enum SecurityEventType {
@@ -56,42 +241,219 @@ enum SecurityEventType {
   ACCESS_DENIED
   PASSWORD_RESET
   PASSWORD_CHANGED
+  USER_CREATED
+  USER_UPDATED
+  USER_STATUS_CHANGED
+  USER_ROLE_CHANGED
+  DEALER_MEMBER_CREATED
+  DEALER_MEMBER_UPDATED
+  DEALER_MEMBER_DELETED
+  DEALER_PROFILE_CREATED
+  DEALER_PROFILE_UPDATED
+  DEALER_ARCHIVED
+  DEALER_REACTIVATED
+  INTERNAL_DEALER_ORDER_CREATED
   FIRST_OWNER_CREATED
   OFFICE_LOCATION_UPDATED
   ATTENDANCE_PUNCH
   ATTENDANCE_BREAK
   ATTENDANCE_BLOCKED
+  ATTENDANCE_PAY_PROFILE_UPDATED
+  ATTENDANCE_ADVANCE_REQUESTED
+  ATTENDANCE_ADVANCE_APPROVED
+  ATTENDANCE_ADVANCE_REJECTED
+  ATTENDANCE_LEAVE_REQUESTED
+  ATTENDANCE_OWNER_UNAVAILABLE_RECORDED
+  ATTENDANCE_LEAVE_APPROVED
+  ATTENDANCE_LEAVE_REJECTED
+  ATTENDANCE_CORRECTED
+  ATTENDANCE_STALE_REVIEW
+  ATTENDANCE_OVERTIME_APPROVED
+  ATTENDANCE_OVERTIME_REJECTED
+  ATTENDANCE_HOLIDAY_UPDATED
+  PAYROLL_FINALIZED
+  PAYROLL_PAYMENT_UPDATED
+  EMPLOYEE_PROFILE_UPDATED
+  EMPLOYEE_LIFECYCLE_RECORDED
+  ATTENDANCE_CORRECTION_REQUESTED
+  ATTENDANCE_CORRECTION_APPROVED
+  ATTENDANCE_CORRECTION_REJECTED
   TRANSPORT_OPTION_CREATED
   TRANSPORT_OPTION_UPDATED
   TRANSPORT_OPTION_DISABLED
   TRANSPORT_ASSIGNED
   DELIVERY_PROOF_UPLOADED
+  DELIVERY_PROOF_ASSISTANCE_REQUESTED
+  DELIVERY_PROOF_ASSISTANCE_CANCELLED
+  DELIVERY_PROOF_ASSISTANCE_COMPLETED
+  DELIVERY_PROOF_REPLACED
+  ORDER_RECEIVED
+  ORDER_RECEIVING_UPDATED
+  PHYSICAL_TEAM_ASSIGNED
+  PHYSICAL_CHECK_STARTED
+  PHYSICAL_CHECK_COMPLETED
+  PHYSICAL_CHECK_ISSUE_REPORTED
+  QC_REWORK_REQUESTED
+  QC_REWORK_COMPLETED
+  QC_APPROVED
+  INVENTORY_INQUIRY_CREATED
+  INVENTORY_INQUIRY_UPDATED
+  WORK_TEAM_CREATED
+  WORK_TEAM_UPDATED
+  WORK_TEAM_MEMBER_UPDATED
+  WORK_TASK_CREATED
+  WORK_TASK_UPDATED
+  WORK_TASK_COMMENTED
+  WORK_TASK_STATUS_CHANGED
+  WORK_TASK_REMINDER_SWEEP
+  FIELD_VISIT_CREATED
+  FIELD_VISIT_UPDATED
+  COLLECTION_CREATED
+  COLLECTION_UPDATED
+  COLLECTION_STATUS_CHANGED
+  COLLECTION_PROOF_UPLOADED
+  COLLECTION_VERIFIED
+  ALERT_ACKNOWLEDGED
+  ALERT_RESOLVED
+  DAILY_ARCHIVE_GENERATED
+  SUPPLIER_CREATED
+  SUPPLIER_UPDATED
+  SUPPLIER_ARCHIVED
+  SUPPLIER_REACTIVATED
+  PRODUCT_SUPPLIER_UPDATED
+  PURCHASE_REQUEST_CREATED
+  PURCHASE_REQUEST_SUBMITTED
+  PURCHASE_REQUEST_APPROVED
+  PURCHASE_REQUEST_REJECTED
+  PURCHASE_REQUEST_ORDERED
+  PURCHASE_REQUEST_IN_TRANSIT
+  PURCHASE_REQUEST_CANCELLED
+  PURCHASE_STOCK_RECEIVED
 }
 
 model User {
-  id                 String     @id @default(cuid())
+  id                 String       @id @default(cuid())
   name               String
-  email              String     @unique
+  email              String       @unique
   phone              String?
   passwordHash       String?
-  mustChangePassword Boolean    @default(false)
+  mustChangePassword Boolean      @default(false)
   role               UserRole
-  status             UserStatus @default(ACTIVE)
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+  status             UserStatus   @default(ACTIVE)
+  geofenceMode       GeofenceMode @default(OFFICE_REQUIRED)
+  archivedAt         DateTime?
+  archivedById       String?
+  archivedByName     String?
+  exitReason         String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
-  dealerOrders             Order[]                   @relation("DealerOrders")
-  assignedDriverOrders     Order[]                   @relation("AssignedDriverOrders")
-  authSessions             AuthSession[]
-  securityAuditLogs        SecurityAuditLog[]        @relation("SecurityAuditLogs")
-  officeAttendanceRecords  OfficeAttendance[]        @relation("OfficeAttendanceUser")
-  officeAttendanceEvents   OfficeAttendanceEvent[]   @relation("OfficeAttendanceEventUser")
-  officeAttendanceAttempts OfficeAttendanceAttempt[] @relation("OfficeAttendanceAttemptUser")
-  stockBlocksCreated       StockBlockTimeline[]      @relation("StockBlockTimelineBlockedBy")
-  stockBlocksReleased      StockBlockTimeline[]      @relation("StockBlockTimelineReleasedBy")
-  transportOptionsCreated  TransportOption[]         @relation("TransportOptionCreatedBy")
-  transportOptionsUpdated  TransportOption[]         @relation("TransportOptionUpdatedBy")
-  deliveryProofsUploaded   DeliveryProof[]           @relation("DeliveryProofUploadedBy")
+  dealerOrders                  Order[]                       @relation("DealerOrders")
+  assignedDriverOrders          Order[]                       @relation("AssignedDriverOrders")
+  receivedOrders                Order[]                       @relation("OrdersReceivedBy")
+  authSessions                  AuthSession[]
+  securityAuditLogs             SecurityAuditLog[]            @relation("SecurityAuditLogs")
+  officeAttendanceRecords       OfficeAttendance[]            @relation("OfficeAttendanceUser")
+  officeAttendanceEvents        OfficeAttendanceEvent[]       @relation("OfficeAttendanceEventUser")
+  officeAttendanceAttempts      OfficeAttendanceAttempt[]     @relation("OfficeAttendanceAttemptUser")
+  attendancePayProfile          AttendancePayProfile?         @relation("AttendancePayProfileUser")
+  attendancePayProfilesSet      AttendancePayProfile[]        @relation("AttendancePayProfileUpdatedBy")
+  attendanceAdvanceRequests     AttendanceAdvanceRequest[]    @relation("AttendanceAdvanceUser")
+  attendanceAdvanceDecisions    AttendanceAdvanceRequest[]    @relation("AttendanceAdvanceDecidedBy")
+  attendanceLeaveRequests       AttendanceLeaveRequest[]      @relation("AttendanceLeaveUser")
+  attendanceLeaveDecisions      AttendanceLeaveRequest[]      @relation("AttendanceLeaveDecidedBy")
+  stockBlocksCreated            StockBlockTimeline[]          @relation("StockBlockTimelineBlockedBy")
+  stockBlocksReleased           StockBlockTimeline[]          @relation("StockBlockTimelineReleasedBy")
+  transportOptionsCreated       TransportOption[]             @relation("TransportOptionCreatedBy")
+  transportOptionsUpdated       TransportOption[]             @relation("TransportOptionUpdatedBy")
+  deliveryProofsUploaded        DeliveryProof[]               @relation("DeliveryProofUploadedBy")
+  deliveryProofsReplaced        DeliveryProof[]               @relation("DeliveryProofReplacedBy")
+  deliveredOrders               Order[]                       @relation("OrdersDeliveredBy")
+  deliveryProofRequests         Order[]                       @relation("DeliveryProofRequestedBy")
+  deliveryProofCompletions      Order[]                       @relation("DeliveryProofCompletedBy")
+  inventoryInquiriesCreated     InventoryInquiry[]            @relation("InventoryInquiryCreatedBy")
+  fieldVisitsCreated            FieldVisit[]                  @relation("FieldVisitCreatedBy")
+  workTeamsCreated              WorkTeam[]                    @relation("WorkTeamsCreated")
+  workTeamsUpdated              WorkTeam[]                    @relation("WorkTeamsUpdated")
+  workTeamMemberships           WorkTeamMember[]              @relation("WorkTeamMemberships")
+  workTeamMembersAdded          WorkTeamMember[]              @relation("WorkTeamMembersAddedBy")
+  workTasksAssigned             WorkTask[]                    @relation("WorkTasksAssigned")
+  workTasksCreated              WorkTask[]                    @relation("WorkTasksCreated")
+  workTaskComments              WorkTaskComment[]             @relation("WorkTaskCommentsCreatedBy")
+  workTaskActivities            WorkTaskActivity[]            @relation("WorkTaskActivitiesCreatedBy")
+  collectionTasksAssigned       CollectionAssignment[]        @relation("CollectionAssignmentAssignedTo")
+  collectionTasksCreated        CollectionAssignment[]        @relation("CollectionAssignmentCreatedBy")
+  collectionTasksDealer         CollectionAssignment[]        @relation("CollectionAssignmentDealer")
+  collectionsCollected          CollectionAssignment[]        @relation("CollectionAssignmentCollectedBy")
+  collectionsVerified           CollectionAssignment[]        @relation("CollectionAssignmentVerifiedBy")
+  collectionProofsUploaded      CollectionProof[]             @relation("CollectionProofUploadedBy")
+  notificationRecipients        NotificationRecipient[]       @relation("NotificationRecipients")
+  notificationsAuthored         Notification[]                @relation("NotificationActor")
+  physicalAssignmentsAssigned   OrderPhysicalAssignment[]     @relation("PhysicalAssignmentsAssignedBy")
+  physicalAssignmentsStarted    OrderPhysicalAssignment[]     @relation("PhysicalAssignmentsStartedBy")
+  physicalAssignmentsCompleted  OrderPhysicalAssignment[]     @relation("PhysicalAssignmentsCompletedBy")
+  physicalAssignmentsQcRejected OrderPhysicalAssignment[]     @relation("PhysicalAssignmentsQcRejectedBy")
+  physicalItemsChecked          OrderPhysicalAssignmentItem[] @relation("PhysicalAssignmentItemsCheckedBy")
+  roleAssignments               UserRoleAssignment[]          @relation("UserRoleAssignments")
+  roleAssignmentsCreated        UserRoleAssignment[]          @relation("UserRoleAssignmentsCreatedBy")
+  dealerCart                    DealerCart?                   @relation("DealerCartOwner")
+  dealerProfile                 DealerProfile?                @relation("DealerProfileOwner")
+  employeeProfile                EmployeeProfile?              @relation("EmployeeProfileUser")
+  reportingManagerProfiles       EmployeeProfile[]             @relation("EmployeeReportingManager")
+  employeeLifecycleEvents        EmployeeLifecycleEvent[]      @relation("EmployeeLifecycleUser")
+  employeeLifecycleEventsCreated EmployeeLifecycleEvent[]      @relation("EmployeeLifecycleCreatedBy")
+  attendanceCorrectionRequests   AttendanceCorrectionRequest[] @relation("AttendanceCorrectionRequestUser")
+  attendanceCorrectionDecisions  AttendanceCorrectionRequest[] @relation("AttendanceCorrectionRequestDecidedBy")
+  payrollPaymentsMarked          PayrollRunItem[]              @relation("PayrollRunItemPaidBy")
+}
+
+model DealerProfile {
+  id              String   @id @default(cuid())
+  dealerId        String   @unique
+  businessName    String
+  contactPerson   String?
+  gstNumber       String?  @unique
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  postalCode      String?
+  creditLimit     Decimal  @default(0) @db.Decimal(14, 2)
+  openingBalance  Decimal  @default(0) @db.Decimal(14, 2)
+  internalNotes   String?
+  createdById     String?
+  createdByName   String?
+  updatedById     String?
+  updatedByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  dealer User @relation("DealerProfileOwner", fields: [dealerId], references: [id], onDelete: Cascade)
+
+  @@index([businessName])
+  @@index([city])
+  @@index([state])
+  @@index([updatedAt])
+}
+
+model UserRoleAssignment {
+  id             String   @id @default(cuid())
+  userId         String
+  role           UserRole
+  isPrimary      Boolean  @default(false)
+  assignedById   String?
+  assignedByName String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user       User  @relation("UserRoleAssignments", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy User? @relation("UserRoleAssignmentsCreatedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, role])
+  @@index([userId])
+  @@index([role])
+  @@index([isPrimary])
+  @@index([assignedById])
 }
 
 model AuthSession {
@@ -105,6 +467,23 @@ model AuthSession {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+model DealerMember {
+  id            String   @id @default(cuid())
+  memberName    String
+  dealerName    String
+  contactNumber String
+  createdById   String?
+  createdByName String?
+  updatedById   String?
+  updatedByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([dealerName])
+  @@index([contactNumber])
+  @@index([createdAt])
 }
 
 model SecurityAuditLog {
@@ -128,66 +507,269 @@ model SecurityAuditLog {
   @@index([createdAt])
 }
 
-model Product {
-  id           String        @id @default(cuid())
-  code         String        @unique
-  name         String
-  stack        String
-  quantity     Int
-  blocked      Int           @default(0)
-  minimumStock Int           @default(0)
-  status       ProductStatus @default(AVAILABLE)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+model Notification {
+  id               String   @id @default(cuid())
+  title            String
+  message          String
+  module           String   @default("SYSTEM")
+  href             String?
+  priority         String   @default("NORMAL")
+  status           String   @default("OPEN")
+  dedupeKey        String?  @unique
+  orderId          String?
+  actorUserId      String?
+  actorName        String?
+  actorRole        String?
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+  resolvedAt       DateTime?
+  resolvedById     String?
+  resolutionNote   String?
+  escalatedAt      DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime @default(now())
 
+  order      Order?                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor      User?                   @relation("NotificationActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  recipients NotificationRecipient[]
+
+  @@index([module])
+  @@index([priority])
+  @@index([status])
+  @@index([orderId])
+  @@index([actorUserId])
+  @@index([acknowledgedAt])
+  @@index([resolvedAt])
+  @@index([escalatedAt])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model NotificationRecipient {
+  id             String    @id @default(cuid())
+  notificationId String
+  userId         String?
+  roleSnapshot   UserRole?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User?        @relation("NotificationRecipients", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([notificationId])
+  @@index([userId])
+  @@index([roleSnapshot])
+  @@index([readAt])
+  @@index([createdAt])
+}
+
+model ProductCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+
+  @@index([isActive])
+  @@index([name])
+}
+
+model ProductBrand {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+
+  @@index([isActive])
+  @@index([name])
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  code           String        @unique
+  name           String
+  description    String?
+  categoryId     String
+  brandId        String
+  stack          String
+  unit           String        @default("Sheets")
+  gstRate        Decimal       @default(18) @db.Decimal(5, 2)
+  purchasePrice  Decimal?      @db.Decimal(12, 2)
+  sellingPrice   Decimal?      @db.Decimal(12, 2)
+  dealerPrice    Decimal?      @db.Decimal(12, 2)
+  imageData      Bytes?
+  imageMimeType  String?
+  imageFileName  String?
+  quantity       Int
+  blocked        Int           @default(0)
+  minimumStock   Int           @default(0)
+  maximumStock   Int           @default(0)
+  status         ProductStatus @default(AVAILABLE)
+  isActive       Boolean       @default(true)
+  archivedAt     DateTime?     @db.Timestamptz(6)
+  archivedById   String?
+  archivedByName String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  category            ProductCategory      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand               ProductBrand         @relation(fields: [brandId], references: [id], onDelete: Restrict)
   orderItems          OrderItem[]
   stockBlockTimelines StockBlockTimeline[]
+  inventoryInquiries  InventoryInquiry[]
+  dealerCartItems      DealerCartItem[]
+  supplierLinks        ProductSupplier[]
+  purchaseRequestItems PurchaseRequestItem[]
+  purchaseReceiptItems PurchaseReceiptItem[]
+
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([status])
+  @@index([isActive])
+  @@index([minimumStock])
+  @@index([maximumStock])
+}
+
+
+model DealerCart {
+  id        String   @id @default(cuid())
+  dealerId  String   @unique
+  notes     String?
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dealer User             @relation("DealerCartOwner", fields: [dealerId], references: [id], onDelete: Cascade)
+  items  DealerCartItem[]
+
+  @@index([updatedAt])
+}
+
+model DealerCartItem {
+  id                  String               @id @default(cuid())
+  cartId              String
+  productId           String
+  quantity            Int
+  unitPriceSnapshot   Decimal              @db.Decimal(12, 2)
+  gstRateSnapshot     Decimal              @db.Decimal(5, 2)
+  priceSourceSnapshot OrderItemPriceSource
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  cart    DealerCart @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([cartId, productId])
+  @@index([cartId])
+  @@index([productId])
+  @@index([updatedAt])
 }
 
 model Order {
-  id                      String      @id @default(cuid())
-  orderNumber             String      @unique
-  dealerId                String
-  assignedDriverId        String?
-  transportOptionId       String?
-  transportLabel          String?
-  signedInvoiceStatus     String      @default("NOT_UPLOADED")
-  signedInvoiceUploadedAt DateTime?
-  status                  OrderStatus @default(NEW_ORDER)
-  notes                   String?
-  createdAt               DateTime    @default(now())
-  updatedAt               DateTime    @updatedAt
+  id                            String                        @id @default(cuid())
+  orderNumber                   String                        @unique
+  dealerId                      String
+  assignedDriverId              String?
+  transportOptionId             String?
+  transportLabel                String?
+  signedInvoiceStatus           String                        @default("NOT_UPLOADED")
+  signedInvoiceUploadedAt       DateTime?
+  deliveredById                 String?
+  deliveredByName               String?
+  deliveredAt                   DateTime?
+  deliveryProofAssistanceStatus DeliveryProofAssistanceStatus @default(NOT_REQUESTED)
+  deliveryProofRequestedById    String?
+  deliveryProofRequestedByName  String?
+  deliveryProofRequestedAt      DateTime?
+  deliveryProofRequestNote      String?
+  deliveryProofCompletedById    String?
+  deliveryProofCompletedByName  String?
+  deliveryProofCompletedAt      DateTime?
+  receivedById                  String?
+  receivedByName                String?
+  receivedAt                    DateTime?
+  receivingNotes                String?
+  status                        OrderStatus                   @default(NEW_ORDER)
+  source                        OrderSource                   @default(DEALER_PORTAL)
+  enteredById                   String?
+  enteredByName                 String?
+  enteredByRole                 String?
+  priority                      String                        @default("NORMAL")
+  requiredBy                    DateTime?
+  cancellationPreviousStatus    OrderStatus?
+  cancellationRequestedAt       DateTime?
+  cancellationRequestedById     String?
+  cancellationRequestedByName   String?
+  cancellationRequestReason     String?
+  cancellationDecidedAt         DateTime?
+  cancellationDecidedById       String?
+  cancellationDecidedByName     String?
+  cancellationDecisionReason    String?
+  notes                         String?
+  createdAt                     DateTime                      @default(now())
+  updatedAt                     DateTime                      @updatedAt
 
-  dealer              User                 @relation("DealerOrders", fields: [dealerId], references: [id])
-  assignedDriver      User?                @relation("AssignedDriverOrders", fields: [assignedDriverId], references: [id])
-  transportOption     TransportOption?     @relation("OrderTransportOption", fields: [transportOptionId], references: [id], onDelete: SetNull)
-  items               OrderItem[]
-  statusHistory       OrderStatusHistory[]
-  stockBlockTimelines StockBlockTimeline[]
-  deliveryProofs      DeliveryProof[]
+  dealer                   User                      @relation("DealerOrders", fields: [dealerId], references: [id])
+  assignedDriver           User?                     @relation("AssignedDriverOrders", fields: [assignedDriverId], references: [id])
+  deliveredBy              User?                     @relation("OrdersDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
+  deliveryProofRequestedBy User?                     @relation("DeliveryProofRequestedBy", fields: [deliveryProofRequestedById], references: [id], onDelete: SetNull)
+  deliveryProofCompletedBy User?                     @relation("DeliveryProofCompletedBy", fields: [deliveryProofCompletedById], references: [id], onDelete: SetNull)
+  receivedBy               User?                     @relation("OrdersReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+  transportOption          TransportOption?          @relation("OrderTransportOption", fields: [transportOptionId], references: [id], onDelete: SetNull)
+  items                    OrderItem[]
+  statusHistory            OrderStatusHistory[]
+  stockBlockTimelines      StockBlockTimeline[]
+  deliveryProofs           DeliveryProof[]
+  notifications            Notification[]
+  physicalAssignments      OrderPhysicalAssignment[]
+  workflowTasks            WorkTask[]
 
   @@index([dealerId])
   @@index([assignedDriverId])
+  @@index([deliveredById])
+  @@index([deliveryProofAssistanceStatus])
+  @@index([deliveryProofRequestedById])
+  @@index([deliveryProofCompletedById])
+  @@index([receivedById])
+  @@index([receivedAt])
   @@index([transportOptionId])
   @@index([signedInvoiceStatus])
   @@index([status])
+  @@index([source])
+  @@index([priority])
+  @@index([requiredBy])
+  @@index([cancellationPreviousStatus])
+  @@index([cancellationRequestedAt])
 }
 
 model OrderItem {
-  id                String   @id @default(cuid())
+  id                String               @id @default(cuid())
   orderId           String
   productId         String
-  requestedQuantity Int      @default(0)
+  requestedQuantity Int                  @default(0)
   quantity          Int
-  blockedQuantity   Int      @default(0)
-  deliveredQuantity Int      @default(0)
-  cancelledQuantity Int      @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  blockedQuantity   Int                  @default(0)
+  deliveredQuantity Int                  @default(0)
+  cancelledQuantity Int                  @default(0)
+  unitPrice         Decimal              @db.Decimal(12, 2)
+  gstRate           Decimal              @db.Decimal(5, 2)
+  lineSubtotal      Decimal              @db.Decimal(14, 2)
+  taxAmount         Decimal              @db.Decimal(14, 2)
+  lineTotal         Decimal              @db.Decimal(14, 2)
+  priceSource       OrderItemPriceSource
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
-  order               Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product             Product              @relation(fields: [productId], references: [id])
-  stockBlockTimelines StockBlockTimeline[]
+  order                  Order                        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product                Product                      @relation(fields: [productId], references: [id])
+  stockBlockTimelines    StockBlockTimeline[]
+  physicalAssignmentItem OrderPhysicalAssignmentItem?
 
   @@index([orderId])
   @@index([productId])
@@ -307,6 +889,291 @@ model OfficeAttendanceAttempt {
   @@index([attemptedAt])
 }
 
+model AttendancePayProfile {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  monthlyBaseSalary    Decimal  @default(0) @db.Decimal(12, 2)
+  monthlyAllowance     Decimal  @default(0) @db.Decimal(12, 2)
+  monthlyDeduction     Decimal  @default(0) @db.Decimal(12, 2)
+  standardDailyMinutes Int      @default(480)
+  overtimeHourlyRate   Decimal  @default(0) @db.Decimal(12, 2)
+  updatedById          String?
+  updatedByName        String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user      User  @relation("AttendancePayProfileUser", fields: [userId], references: [id], onDelete: Cascade)
+  updatedBy User? @relation("AttendancePayProfileUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([updatedById])
+  @@index([updatedAt])
+}
+
+model AttendanceSalaryRevision {
+  id                   String   @id @default(cuid())
+  userId               String
+  effectiveFrom        String
+  monthlyBaseSalary    Decimal  @default(0) @db.Decimal(12, 2)
+  monthlyAllowance     Decimal  @default(0) @db.Decimal(12, 2)
+  monthlyDeduction     Decimal  @default(0) @db.Decimal(12, 2)
+  standardDailyMinutes Int      @default(480)
+  overtimeHourlyRate   Decimal  @default(0) @db.Decimal(12, 2)
+  createdById          String?
+  createdByName        String?
+  createdAt            DateTime @default(now())
+
+  @@unique([userId, effectiveFrom])
+  @@index([userId])
+  @@index([effectiveFrom])
+}
+
+model AttendanceHoliday {
+  id            String   @id @default(cuid())
+  holidayDate   String   @unique
+  name          String
+  isPaid        Boolean  @default(true)
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([holidayDate])
+}
+
+model AttendanceOvertimeApproval {
+  id                String    @id @default(cuid())
+  attendanceId      String    @unique
+  userId            String
+  workDate          String
+  calculatedMinutes Int
+  approvedMinutes   Int       @default(0)
+  status            String    @default("PENDING")
+  decidedById       String?
+  decidedByName     String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([workDate])
+  @@index([status])
+}
+
+model AttendanceCorrection {
+  id                  String    @id @default(cuid())
+  attendanceId        String
+  userId              String
+  previousPunchIn     DateTime?
+  previousPunchOut    DateTime?
+  correctedPunchIn    DateTime
+  correctedPunchOut   DateTime
+  previousNetMinutes  Int?
+  correctedNetMinutes Int
+  reason              String
+  correctedById       String?
+  correctedByName     String?
+  createdAt           DateTime  @default(now())
+
+  @@index([attendanceId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model EmployeeProfile {
+  id                    String         @id @default(cuid())
+  userId                String         @unique
+  employeeCode          String?        @unique
+  department            String?
+  designation           String?
+  employmentType        EmploymentType @default(FULL_TIME)
+  joiningDate           String?
+  probationEndDate      String?
+  reportingManagerId    String?
+  reportingManagerName  String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  lastWorkingDate       String?
+  notes                 String?
+  createdById           String?
+  createdByName         String?
+  updatedById           String?
+  updatedByName         String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  user             User  @relation("EmployeeProfileUser", fields: [userId], references: [id], onDelete: Restrict)
+  reportingManager User? @relation("EmployeeReportingManager", fields: [reportingManagerId], references: [id], onDelete: SetNull)
+
+  @@index([employeeCode])
+  @@index([department])
+  @@index([designation])
+  @@index([employmentType])
+  @@index([reportingManagerId])
+  @@index([joiningDate])
+}
+
+model EmployeeLifecycleEvent {
+  id            String                @id @default(cuid())
+  userId        String
+  eventType     EmployeeLifecycleType
+  effectiveDate String
+  title         String
+  details       String?
+  previousValue String?
+  newValue      String?
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime              @default(now())
+
+  user      User  @relation("EmployeeLifecycleUser", fields: [userId], references: [id], onDelete: Restrict)
+  createdBy User? @relation("EmployeeLifecycleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([effectiveDate])
+  @@index([createdAt])
+}
+
+model AttendanceCorrectionRequest {
+  id                  String                   @id @default(cuid())
+  userId              String
+  workDate            String
+  requestedPunchIn    DateTime
+  requestedPunchOut   DateTime
+  reason              String
+  status              AttendanceRequestStatus @default(PENDING)
+  requestedAt         DateTime                 @default(now())
+  decidedById         String?
+  decidedByName       String?
+  decidedAt           DateTime?
+  decisionNote        String?
+  appliedAttendanceId String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  user      User  @relation("AttendanceCorrectionRequestUser", fields: [userId], references: [id], onDelete: Restrict)
+  decidedBy User? @relation("AttendanceCorrectionRequestDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([workDate])
+  @@index([status])
+  @@index([requestedAt])
+  @@index([decidedById])
+}
+
+model PayrollRun {
+  id              String    @id @default(cuid())
+  monthKey        String    @unique
+  status          String    @default("DRAFT")
+  finalizedAt     DateTime?
+  finalizedById   String?
+  finalizedByName String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  items PayrollRunItem[]
+
+  @@index([monthKey])
+  @@index([status])
+}
+
+model PayrollRunItem {
+  id                   String   @id @default(cuid())
+  payrollRunId         String
+  userId               String
+  userName             String
+  userEmail            String
+  userRole             String
+  monthlyBaseSalary    Decimal  @db.Decimal(12, 2)
+  monthlyAllowance     Decimal  @default(0) @db.Decimal(12, 2)
+  monthlyDeduction     Decimal  @default(0) @db.Decimal(12, 2)
+  perDaySalary         Decimal  @db.Decimal(12, 2)
+  standardDailyMinutes Int
+  overtimeHourlyRate   Decimal  @db.Decimal(12, 2)
+  fullDays             Int
+  halfDays             Int
+  paidLeaveDays        Decimal  @db.Decimal(6, 2)
+  paidSundayDays       Int
+  paidHolidayDays      Int
+  payableDays          Decimal  @db.Decimal(6, 2)
+  overtimeMinutes      Int
+  grossSalary          Decimal  @db.Decimal(12, 2)
+  overtimePay          Decimal  @db.Decimal(12, 2)
+  approvedAdvance      Decimal  @db.Decimal(12, 2)
+  netPay               Decimal              @db.Decimal(12, 2)
+  paymentStatus        PayrollPaymentStatus @default(PENDING)
+  paidAt               DateTime?
+  paidById             String?
+  paidByName           String?
+  paymentReference     String?
+  paymentNote          String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  paidBy     User?      @relation("PayrollRunItemPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+
+  @@unique([payrollRunId, userId])
+  @@index([payrollRunId])
+  @@index([userId])
+  @@index([paymentStatus])
+  @@index([paidAt])
+  @@index([paidById])
+}
+
+model AttendanceAdvanceRequest {
+  id            String                  @id @default(cuid())
+  userId        String
+  amount        Decimal                 @db.Decimal(12, 2)
+  reason        String?
+  status        AttendanceRequestStatus @default(PENDING)
+  requestedAt   DateTime                @default(now())
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  user      User  @relation("AttendanceAdvanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User? @relation("AttendanceAdvanceDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([requestedAt])
+  @@index([decidedById])
+}
+
+model AttendanceLeaveRequest {
+  id            String                  @id @default(cuid())
+  userId        String
+  startDate     String
+  endDate       String
+  leaveType     AttendanceLeaveType     @default(FULL_DAY)
+  days          Decimal                 @default(1) @db.Decimal(6, 2)
+  reason        String?
+  status        AttendanceRequestStatus @default(PENDING)
+  requestedAt   DateTime                @default(now())
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  user      User  @relation("AttendanceLeaveUser", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User? @relation("AttendanceLeaveDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([requestedAt])
+  @@index([decidedById])
+}
+
 model StockBlockTimeline {
   id              String    @id @default(cuid())
   productId       String
@@ -343,6 +1210,91 @@ model StockBlockTimeline {
   @@index([releasedAt])
 }
 
+model InventoryInquiry {
+  id             String                 @id @default(cuid())
+  inquiryNumber  String                 @unique
+  productId      String?
+  productName    String
+  quantityAsked  Int
+  customerName   String?
+  customerPhone  String?
+  dealerName     String?
+  source         String                 @default("CALL")
+  status         InventoryInquiryStatus @default(NEW_INQUIRY)
+  description    String?
+  nextFollowUpAt DateTime?
+  orderNumber    String?
+  createdById    String?
+  createdByName  String?
+  createdByEmail String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  createdBy User?    @relation("InventoryInquiryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([createdById])
+  @@index([status])
+  @@index([createdAt])
+  @@index([nextFollowUpAt])
+}
+
+model FieldVisit {
+  id                String           @id @default(cuid())
+  visitNumber       String           @unique
+  createdById       String?
+  createdByName     String?
+  createdByEmail    String?
+  createdByRole     String?
+  shopName          String
+  dealerName        String?
+  contactPerson     String?
+  contactPhone      String?
+  visitType         String           @default("DEALER_VISIT")
+  status            FieldVisitStatus @default(VISIT_REPORTED)
+  description       String
+  pointsDiscussed   String?
+  goalsAchieved     String?
+  goalsPending      String?
+  nextFollowUpAt    DateTime?
+  latitude          Float
+  longitude         Float
+  accuracyMeters    Float?
+  locationLabel     String?
+  shopPhotoFileName String
+  shopPhotoMimeType String
+  shopPhotoDataUrl  String
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  createdBy User?             @relation("FieldVisitCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  photos    FieldVisitPhoto[]
+
+  @@index([createdById])
+  @@index([status])
+  @@index([visitType])
+  @@index([createdAt])
+  @@index([nextFollowUpAt])
+}
+
+model FieldVisitPhoto {
+  id           String   @id @default(cuid())
+  fieldVisitId String
+  fileName     String
+  mimeType     String
+  fileDataUrl  String
+  caption      String?
+  sortOrder    Int      @default(0)
+  uploadedAt   DateTime @default(now())
+
+  fieldVisit FieldVisit @relation(fields: [fieldVisitId], references: [id], onDelete: Cascade)
+
+  @@index([fieldVisitId])
+  @@index([sortOrder])
+  @@index([uploadedAt])
+}
+
 model TransportOption {
   id            String   @id @default(cuid())
   name          String   @unique
@@ -365,21 +1317,555 @@ model TransportOption {
 }
 
 model DeliveryProof {
+  id                String                  @id @default(cuid())
+  orderId           String
+  uploadedById      String?
+  proofType         String                  @default("SIGNED_DUPLICATE_INVOICE")
+  uploadMode        DeliveryProofUploadMode @default(DRIVER_SELF)
+  deliveredByName   String?
+  fileName          String
+  mimeType          String
+  fileDataUrl       String
+  fileSizeBytes     Int?
+  fileSha256        String?
+  note              String?
+  isActive          Boolean                 @default(true)
+  replacedAt        DateTime?
+  replacedById      String?
+  replacedByName    String?
+  replacementReason String?
+  uploadedAt        DateTime                @default(now())
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  uploadedBy User? @relation("DeliveryProofUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  replacedBy User? @relation("DeliveryProofReplacedBy", fields: [replacedById], references: [id], onDelete: SetNull)
+
+  @@index([orderId, fileSha256])
+  @@index([orderId])
+  @@index([uploadedById])
+  @@index([replacedById])
+  @@index([proofType])
+  @@index([uploadMode])
+  @@index([isActive])
+  @@index([uploadedAt])
+}
+
+model CollectionAssignment {
+  id               String                @id @default(cuid())
+  collectionNumber String                @unique
+  dealerId         String?
+  dealerName       String
+  contactPerson    String?
+  contactPhone     String?
+  assignedToId     String?
+  amountToCollect  Int
+  amountCollected  Int                   @default(0)
+  paymentMode      CollectionPaymentMode @default(CASH)
+  status           CollectionStatus      @default(ASSIGNED)
+  dueAt            DateTime?
+  notes            String?
+  onTheWayAt       DateTime?
+  reachedAt        DateTime?
+  collectedAt      DateTime?
+  verifiedAt       DateTime?
+  failedAt         DateTime?
+  rescheduledAt    DateTime?
+  nextFollowUpAt   DateTime?
+  failureReason    String?
+  collectedById    String?
+  collectedByName  String?
+  verifiedById     String?
+  createdById      String?
+  createdByName    String?
+  createdByEmail   String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  dealer      User?             @relation("CollectionAssignmentDealer", fields: [dealerId], references: [id], onDelete: SetNull)
+  assignedTo  User?             @relation("CollectionAssignmentAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  collectedBy User?             @relation("CollectionAssignmentCollectedBy", fields: [collectedById], references: [id], onDelete: SetNull)
+  verifiedBy  User?             @relation("CollectionAssignmentVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  createdBy   User?             @relation("CollectionAssignmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  proofs      CollectionProof[]
+
+  @@index([dealerId])
+  @@index([assignedToId])
+  @@index([collectedById])
+  @@index([verifiedById])
+  @@index([createdById])
+  @@index([status])
+  @@index([paymentMode])
+  @@index([dueAt])
+  @@index([createdAt])
+}
+
+model CollectionProof {
   id           String   @id @default(cuid())
-  orderId      String
+  collectionId String
   uploadedById String?
-  proofType    String   @default("SIGNED_DUPLICATE_INVOICE")
+  proofType    String   @default("PAYMENT_PROOF")
   fileName     String
   mimeType     String
   fileDataUrl  String
   note         String?
   uploadedAt   DateTime @default(now())
 
-  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  uploadedBy User? @relation("DeliveryProofUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  collection CollectionAssignment @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  uploadedBy User?                @relation("CollectionProofUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
 
-  @@index([orderId])
+  @@index([collectionId])
   @@index([uploadedById])
   @@index([proofType])
   @@index([uploadedAt])
+}
+
+model WorkTeam {
+  id           String       @id @default(cuid())
+  name         String
+  description  String?
+  parentTeamId String?
+  teamType     WorkTeamType @default(GENERAL)
+  isActive     Boolean      @default(true)
+  createdById  String?
+  updatedById  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  parentTeam          WorkTeam?                 @relation("WorkTeamHierarchy", fields: [parentTeamId], references: [id], onDelete: SetNull)
+  subTeams            WorkTeam[]                @relation("WorkTeamHierarchy")
+  createdBy           User?                     @relation("WorkTeamsCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy           User?                     @relation("WorkTeamsUpdated", fields: [updatedById], references: [id], onDelete: SetNull)
+  members             WorkTeamMember[]
+  tasks               WorkTask[]
+  physicalAssignments OrderPhysicalAssignment[]
+
+  @@index([parentTeamId])
+  @@index([teamType])
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+model WorkTeamMember {
+  id        String             @id @default(cuid())
+  teamId    String
+  userId    String
+  role      WorkTeamMemberRole @default(MEMBER)
+  addedById String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  team    WorkTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user    User     @relation("WorkTeamMemberships", fields: [userId], references: [id], onDelete: Cascade)
+  addedBy User?    @relation("WorkTeamMembersAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@index([role])
+}
+
+model OrderPhysicalAssignment {
+  id               String                  @id @default(cuid())
+  orderId          String
+  teamId           String
+  status           PhysicalCheckStatus     @default(ASSIGNED)
+  assignedById     String?
+  assignedByName   String?
+  assignedAt       DateTime                @default(now())
+  startedById      String?
+  startedByName    String?
+  startedAt        DateTime?
+  completedById    String?
+  completedByName  String?
+  completedAt      DateTime?
+  issueType        PhysicalCheckIssueType?
+  issueNotes       String?
+  qcRejectedById   String?
+  qcRejectedByName String?
+  qcRejectedAt     DateTime?
+  qcNotes          String?
+  revision         Int                     @default(0)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  order        Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  team         WorkTeam                      @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  assignedBy   User?                         @relation("PhysicalAssignmentsAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  startedBy    User?                         @relation("PhysicalAssignmentsStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  completedBy  User?                         @relation("PhysicalAssignmentsCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+  qcRejectedBy User?                         @relation("PhysicalAssignmentsQcRejectedBy", fields: [qcRejectedById], references: [id], onDelete: SetNull)
+  items        OrderPhysicalAssignmentItem[]
+
+  @@unique([orderId, teamId])
+  @@index([orderId])
+  @@index([teamId])
+  @@index([status])
+  @@index([assignedAt])
+  @@index([startedAt])
+  @@index([completedAt])
+}
+
+model OrderPhysicalAssignmentItem {
+  id               String    @id @default(cuid())
+  assignmentId     String
+  orderItemId      String    @unique
+  assignedQuantity Int
+  verifiedQuantity Int?
+  damagedQuantity  Int       @default(0)
+  shortQuantity    Int       @default(0)
+  notes            String?
+  checkedById      String?
+  checkedByName    String?
+  checkedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  assignment OrderPhysicalAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  orderItem  OrderItem               @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  checkedBy  User?                   @relation("PhysicalAssignmentItemsCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+
+  @@index([assignmentId])
+  @@index([checkedById])
+  @@index([checkedAt])
+}
+
+model WorkTask {
+  id                     String           @id @default(cuid())
+  taskNumber             String           @unique
+  title                  String
+  description            String?
+  teamId                 String
+  assigneeId             String?
+  createdById            String?
+  parentTaskId           String?
+  orderId                String?
+  automationKey          String?          @unique
+  isAutomated            Boolean          @default(false)
+  workflowStage          String?
+  sourceEvent            String?
+  statusBeforeBlock      WorkTaskStatus?
+  workflowPauseReason    String?
+  workflowPausePreviousStatus WorkTaskStatus?
+  status                 WorkTaskStatus   @default(TODO)
+  priority               WorkTaskPriority @default(MEDIUM)
+  taskType               String           @default("TASK")
+  dueAt                  DateTime?
+  completedAt            DateTime?
+  relatedModule          String?
+  relatedReference       String?
+  blockerReason          String?
+  calendarStatus         String           @default("NOT_SYNCED")
+  calendarEventId        String?
+  calendarReminderAt     DateTime?
+  calendarNotes          String?
+  calendarSyncedAt       DateTime?
+  googleSyncError        String?
+  calendarReminderSentAt DateTime?
+  dueReminderSentAt      DateTime?
+  overdueReminderSentAt  DateTime?
+  lastReviewedAt         DateTime?
+  reviewedById           String?
+  reviewNotes            String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  team       WorkTeam           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  assignee   User?              @relation("WorkTasksAssigned", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy  User?              @relation("WorkTasksCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  parentTask WorkTask?          @relation("WorkTaskHierarchy", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  subTasks   WorkTask[]         @relation("WorkTaskHierarchy")
+  order      Order?             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  comments   WorkTaskComment[]
+  activities WorkTaskActivity[]
+
+  @@index([teamId])
+  @@index([assigneeId])
+  @@index([createdById])
+  @@index([parentTaskId])
+  @@index([orderId])
+  @@index([isAutomated])
+  @@index([workflowStage])
+  @@index([sourceEvent])
+  @@index([workflowPauseReason])
+  @@index([status])
+  @@index([priority])
+  @@index([taskType])
+  @@index([dueAt])
+  @@index([relatedModule])
+  @@index([calendarStatus])
+  @@index([calendarReminderAt])
+  @@index([calendarSyncedAt])
+  @@index([calendarReminderSentAt])
+  @@index([dueReminderSentAt])
+  @@index([overdueReminderSentAt])
+  @@index([lastReviewedAt])
+  @@index([reviewedById])
+  @@index([createdAt])
+}
+
+model WorkTaskComment {
+  id          String   @id @default(cuid())
+  taskId      String
+  createdById String?
+  body        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task      WorkTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation("WorkTaskCommentsCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model WorkTaskActivity {
+  id        String   @id @default(cuid())
+  taskId    String
+  actorId   String?
+  eventType String
+  message   String
+  createdAt DateTime @default(now())
+
+  task  WorkTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor User?    @relation("WorkTaskActivitiesCreatedBy", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([actorId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model BackupRecord {
+  id             String   @id @default(cuid())
+  kind           String   @default("MANUAL")
+  status         String   @default("RUNNING")
+  fileName       String?
+  filePath       String?
+  sizeBytes      BigInt?
+  sha256         String?
+  manifestPath   String?
+  retentionDays  Int?
+  triggeredById  String?
+  triggeredBy    String?
+  errorMessage   String?
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+  verifiedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([kind])
+  @@index([status])
+  @@index([startedAt])
+  @@index([completedAt])
+  @@index([verifiedAt])
+}
+
+model RestoreAudit {
+  id             String   @id @default(cuid())
+  backupRecordId String?
+  fileName       String
+  filePath       String
+  sha256         String?
+  status         String   @default("STARTED")
+  triggeredById  String?
+  triggeredBy    String?
+  errorMessage   String?
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([backupRecordId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model DailyBusinessArchive {
+  id            String   @id @default(cuid())
+  businessDate  DateTime @unique @db.Date
+  status        String   @default("GENERATING")
+  fileName      String?
+  filePath      String?
+  sha256        String?
+  summary       Json?
+  errorMessage  String?
+  generatedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([generatedAt])
+}
+
+
+
+model Supplier {
+  id                  String   @id @default(cuid())
+  code                String   @unique
+  companyName         String
+  contactPerson       String?
+  phone               String?
+  email               String?
+  gstNumber           String?  @unique
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  state               String?
+  postalCode          String?
+  paymentTerms        String?
+  defaultLeadTimeDays Int      @default(0)
+  internalNotes       String?
+  isActive            Boolean  @default(true)
+  archivedAt          DateTime?
+  archivedById        String?
+  archivedByName      String?
+  createdById         String?
+  createdByName       String?
+  updatedById         String?
+  updatedByName       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  productLinks     ProductSupplier[]
+  purchaseRequests PurchaseRequest[]
+
+  @@index([companyName])
+  @@index([isActive])
+  @@index([city])
+  @@index([state])
+  @@index([updatedAt])
+}
+
+model ProductSupplier {
+  id                   String   @id @default(cuid())
+  productId            String
+  supplierId           String
+  supplierProductCode  String?
+  isPreferred          Boolean  @default(false)
+  minimumOrderQuantity Int      @default(1)
+  lastPurchasePrice    Decimal? @db.Decimal(12, 2)
+  leadTimeDays         Int?
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, supplierId])
+  @@index([productId])
+  @@index([supplierId])
+  @@index([isPreferred])
+  @@index([isActive])
+}
+
+model PurchaseRequest {
+  id                    String                  @id @default(cuid())
+  requestNumber         String                  @unique
+  supplierId            String
+  status                PurchaseRequestStatus   @default(SUBMITTED)
+  priority              PurchaseRequestPriority @default(NORMAL)
+  requestedById         String?
+  requestedByName       String?
+  requestedByRole       String?
+  submittedAt           DateTime?
+  approvedById          String?
+  approvedByName        String?
+  approvedAt            DateTime?
+  rejectedById          String?
+  rejectedByName        String?
+  rejectedAt            DateTime?
+  rejectionReason       String?
+  cancelledById         String?
+  cancelledByName       String?
+  cancelledAt           DateTime?
+  cancellationReason    String?
+  orderedById           String?
+  orderedByName         String?
+  orderedAt             DateTime?
+  purchaseOrderNumber   String?                 @unique
+  inTransitAt           DateTime?
+  expectedDeliveryDate  DateTime?
+  actualDeliveryDate    DateTime?
+  supplierInvoiceNumber String?
+  notes                 String?
+  estimatedTotal        Decimal                 @default(0) @db.Decimal(14, 2)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  supplier Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items    PurchaseRequestItem[]
+  receipts PurchaseReceipt[]
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([priority])
+  @@index([expectedDeliveryDate])
+  @@index([createdAt])
+}
+
+model PurchaseRequestItem {
+  id                String   @id @default(cuid())
+  purchaseRequestId String
+  productId         String
+  requestedQuantity Int
+  approvedQuantity  Int      @default(0)
+  orderedQuantity   Int      @default(0)
+  receivedQuantity  Int      @default(0)
+  damagedQuantity   Int      @default(0)
+  rejectedQuantity  Int      @default(0)
+  estimatedUnitPrice Decimal @default(0) @db.Decimal(12, 2)
+  lineTotal         Decimal  @default(0) @db.Decimal(14, 2)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  product         Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  receiptItems    PurchaseReceiptItem[]
+
+  @@unique([purchaseRequestId, productId])
+  @@index([purchaseRequestId])
+  @@index([productId])
+}
+
+model PurchaseReceipt {
+  id                       String   @id @default(cuid())
+  receiptNumber            String   @unique
+  purchaseRequestId        String
+  supplierInvoiceReference String?
+  challanReference         String?
+  receivedById             String?
+  receivedByName           String?
+  receivedAt               DateTime @default(now())
+  notes                    String?
+  createdAt                DateTime @default(now())
+
+  purchaseRequest PurchaseRequest      @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  items           PurchaseReceiptItem[]
+
+  @@index([purchaseRequestId])
+  @@index([receivedAt])
+}
+
+model PurchaseReceiptItem {
+  id                    String   @id @default(cuid())
+  purchaseReceiptId     String
+  purchaseRequestItemId String
+  productId             String
+  receivedQuantity      Int
+  acceptedQuantity      Int
+  damagedQuantity       Int      @default(0)
+  rejectedQuantity      Int      @default(0)
+  unitCost              Decimal? @db.Decimal(12, 2)
+  notes                 String?
+  createdAt             DateTime @default(now())
+
+  purchaseReceipt     PurchaseReceipt     @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
+  purchaseRequestItem PurchaseRequestItem @relation(fields: [purchaseRequestItemId], references: [id], onDelete: Restrict)
+  product             Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseReceiptId])
+  @@index([purchaseRequestItemId])
+  @@index([productId])
 }

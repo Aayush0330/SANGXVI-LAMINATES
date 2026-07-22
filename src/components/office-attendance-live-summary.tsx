@@ -80,22 +80,22 @@ export function OfficeAttendanceLiveSummary({
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">
-      <div className="rounded-3xl border border-cyan-300/20 bg-cyan-300/10 p-5">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">Total Office Time</p>
-        <p className="mt-3 text-3xl font-black text-cyan-200">{formatDuration(summary.totalOfficeMinutes)}</p>
-        <p className="mt-2 text-xs leading-5 text-slate-400">Total time since Punch In.</p>
+      <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">Total Office Time</p>
+        <p className="mt-3 text-3xl font-black text-blue-700">{formatDuration(summary.totalOfficeMinutes)}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">Total time since Punch In.</p>
       </div>
 
-      <div className="rounded-3xl border border-yellow-300/20 bg-yellow-300/10 p-5">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-yellow-200">Break Time</p>
-        <p className="mt-3 text-3xl font-black text-yellow-200">{formatDuration(summary.breakTimeMinutes)}</p>
-        <p className="mt-2 text-xs leading-5 text-slate-400">Combined lunch, tea, and small-break time.</p>
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-800">Break Time</p>
+        <p className="mt-3 text-3xl font-black text-amber-800">{formatDuration(summary.breakTimeMinutes)}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">Combined lunch, tea, and small-break time.</p>
       </div>
 
-      <div className="rounded-3xl border border-emerald-300/20 bg-emerald-300/10 p-5">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200">Net Working Time</p>
-        <p className="mt-3 text-3xl font-black text-emerald-200">{formatDuration(summary.netWorkMinutes)}</p>
-        <p className="mt-2 text-xs leading-5 text-slate-400">Total office time minus break time.</p>
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Net Working Time</p>
+        <p className="mt-3 text-3xl font-black text-emerald-700">{formatDuration(summary.netWorkMinutes)}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">Total office time minus break time.</p>
       </div>
     </div>
   );

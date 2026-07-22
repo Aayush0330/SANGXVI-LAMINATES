@@ -40,6 +40,12 @@ type RawOrderItemRow = {
   blockedQuantity: number;
   deliveredQuantity: number;
   cancelledQuantity: number;
+  unitPrice: string | number;
+  gstRate: string | number;
+  lineSubtotal: string | number;
+  taxAmount: string | number;
+  lineTotal: string | number;
+  priceSource: string;
   createdAt: Date | string;
   updatedAt: Date | string;
   productCode: string;
@@ -79,7 +85,7 @@ export async function getOrdersWithRelations({
         o."transportLabel",
         o."signedInvoiceStatus",
         o."signedInvoiceUploadedAt",
-        o."status",
+        o."status"::text AS "status",
         o."notes",
         o."createdAt",
         o."updatedAt",
@@ -99,10 +105,10 @@ export async function getOrdersWithRelations({
         driver."updatedAt" AS "assignedDriverUpdatedAt",
         transport."name" AS "transportOptionName",
         transport."description" AS "transportOptionDescription"
-      FROM "Order" o
-      INNER JOIN "User" dealer ON dealer."id" = o."dealerId"
-      LEFT JOIN "User" driver ON driver."id" = o."assignedDriverId"
-      LEFT JOIN "TransportOption" transport ON transport."id" = o."transportOptionId"
+      FROM public."Order" o
+      INNER JOIN public."User" dealer ON dealer."id" = o."dealerId"
+      LEFT JOIN public."User" driver ON driver."id" = o."assignedDriverId"
+      LEFT JOIN public."TransportOption" transport ON transport."id" = o."transportOptionId"
       ${where}
       ORDER BY ${orderBy}
       ${typeof limit === "number" ? `LIMIT ${limit}` : ""}
@@ -126,6 +132,12 @@ export async function getOrdersWithRelations({
         oi."blockedQuantity",
         oi."deliveredQuantity",
         oi."cancelledQuantity",
+        oi."unitPrice",
+        oi."gstRate",
+        oi."lineSubtotal",
+        oi."taxAmount",
+        oi."lineTotal",
+        oi."priceSource"::text AS "priceSource",
         oi."createdAt",
         oi."updatedAt",
         p."code" AS "productCode",
@@ -137,8 +149,8 @@ export async function getOrdersWithRelations({
         p."status" AS "productStatus",
         p."createdAt" AS "productCreatedAt",
         p."updatedAt" AS "productUpdatedAt"
-      FROM "OrderItem" oi
-      INNER JOIN "Product" p ON p."id" = oi."productId"
+      FROM public."OrderItem" oi
+      INNER JOIN public."Product" p ON p."id" = oi."productId"
       WHERE oi."orderId" IN (${placeholders})
       ORDER BY oi."createdAt" ASC
     `,
@@ -168,7 +180,7 @@ export async function getOrdersWithRelations({
 export async function getOrderStatusRows() {
   return prisma.$queryRawUnsafe<{ status: string }[]>(`
     SELECT "status"
-    FROM "Order"
+    FROM public."Order"
   `);
 }
 
@@ -228,6 +240,12 @@ function mapOrderItemRow(row: RawOrderItemRow) {
     blockedQuantity: row.blockedQuantity,
     deliveredQuantity: row.deliveredQuantity,
     cancelledQuantity: row.cancelledQuantity,
+    unitPrice: Number(row.unitPrice),
+    gstRate: Number(row.gstRate),
+    lineSubtotal: Number(row.lineSubtotal),
+    taxAmount: Number(row.taxAmount),
+    lineTotal: Number(row.lineTotal),
+    priceSource: row.priceSource,
     createdAt: new Date(row.createdAt),
     updatedAt: new Date(row.updatedAt),
     product: {

@@ -97,8 +97,8 @@ const employeeRoles: UserRole[] = [
   "owner",
   "manager",
   "accountant",
-  "inventory_team",
   "dispatch_team",
+  "order_team",
   "qc_team",
   "driver_transport",
   "collection_team",
@@ -250,7 +250,7 @@ export async function getActiveOfficeLocation() {
       "isActive",
       "updatedAt",
       "updatedByName"
-    FROM "OfficeLocation"
+    FROM public."OfficeLocation"
     WHERE "isActive" = true
     ORDER BY "updatedAt" DESC
     LIMIT 1
@@ -287,7 +287,7 @@ export async function getTodayAttendanceForUser(userId: string) {
       "breakMinutes",
       "totalMinutes",
       "netWorkingMinutes"
-    FROM "OfficeAttendance"
+    FROM public."OfficeAttendance"
     WHERE "userId" = ${userId}
       AND "workDate" = ${workDate}
     LIMIT 1
@@ -314,8 +314,8 @@ export async function getTodayAttendanceEventsForUser(userId: string) {
       e."photoDataUrl",
       e."note",
       e."createdAt"
-    FROM "OfficeAttendanceEvent" e
-    INNER JOIN "OfficeAttendance" a ON a."id" = e."attendanceId"
+    FROM public."OfficeAttendanceEvent" e
+    INNER JOIN public."OfficeAttendance" a ON a."id" = e."attendanceId"
     WHERE e."userId" = ${userId}
       AND a."workDate" = ${workDate}
     ORDER BY e."createdAt" ASC
@@ -338,8 +338,8 @@ export async function getAttendanceEventsForDate(workDate: string) {
       e."photoDataUrl",
       e."note",
       e."createdAt"
-    FROM "OfficeAttendanceEvent" e
-    INNER JOIN "OfficeAttendance" a ON a."id" = e."attendanceId"
+    FROM public."OfficeAttendanceEvent" e
+    INNER JOIN public."OfficeAttendance" a ON a."id" = e."attendanceId"
     WHERE a."workDate" = ${workDate}
     ORDER BY e."createdAt" ASC
   `;
@@ -399,8 +399,8 @@ export async function getEmployeeAttendanceRows(workDate: string) {
           )
         )
       END AS "netWorkingMinutes"
-    FROM "User" u
-    LEFT JOIN "OfficeAttendance" a
+    FROM public."User" u
+    LEFT JOIN public."OfficeAttendance" a
       ON a."userId" = u."id" AND a."workDate" = ${workDate}
     WHERE u."role"::text <> 'DEALER'
       AND u."status"::text = 'ACTIVE'
@@ -425,8 +425,8 @@ export async function getRecentAttendanceAttempts(limit = 25) {
       attempt."distanceMeters",
       attempt."insideGeofence",
       attempt."attemptedAt"
-    FROM "OfficeAttendanceAttempt" attempt
-    INNER JOIN "User" u ON u."id" = attempt."userId"
+    FROM public."OfficeAttendanceAttempt" attempt
+    INNER JOIN public."User" u ON u."id" = attempt."userId"
     ORDER BY attempt."attemptedAt" DESC
     LIMIT ${limit}
   `;

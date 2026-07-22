@@ -8,7 +8,7 @@ export async function getMustChangePassword(userId: string) {
   try {
     const rows = await prisma.$queryRaw<PasswordChangeRow[]>`
       SELECT "mustChangePassword"
-      FROM "User"
+      FROM public."User"
       WHERE "id" = ${userId}
       LIMIT 1
     `;
@@ -23,7 +23,7 @@ export async function getMustChangePassword(userId: string) {
 export async function setMustChangePassword(userId: string, value: boolean) {
   try {
     await prisma.$executeRaw`
-      UPDATE "User"
+      UPDATE public."User"
       SET "mustChangePassword" = ${value}
       WHERE "id" = ${userId}
     `;

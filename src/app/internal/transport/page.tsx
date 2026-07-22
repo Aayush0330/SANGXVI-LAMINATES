@@ -80,8 +80,8 @@ export default async function TransportOptionsPage({
       t."createdAt",
       t."updatedAt",
       COUNT(o."id") AS "assignedOrders"
-    FROM "TransportOption" t
-    LEFT JOIN "Order" o ON o."transportOptionId" = t."id"
+    FROM public."TransportOption" t
+    LEFT JOIN public."Order" o ON o."transportOptionId" = t."id"
     GROUP BY t."id"
     ORDER BY t."isActive" DESC, t."sortOrder" ASC, t."name" ASC
   `;
@@ -96,20 +96,16 @@ export default async function TransportOptionsPage({
     <div>
       <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-300 sm:text-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-600 sm:text-sm">
             Dispatch Setup
           </p>
-          <h1 className="mt-2 text-2xl font-bold text-white sm:mt-3 sm:text-3xl md:text-5xl">
+          <h1 className="mt-2 text-2xl font-bold text-slate-950 sm:mt-3 sm:text-3xl md:text-5xl">
             Transport Options
           </h1>
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-slate-300 sm:mt-4 sm:text-sm sm:leading-6">
-            Owner-friendly transport setup for Auto, Tempo, Truck, Courier,
-            company vehicles, and any custom delivery method.
-          </p>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-slate-200">
-          Active: <span className="text-cyan-300">{activeCount}</span>
+        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700">
+          Active: <span className="text-blue-600">{activeCount}</span>
         </div>
       </div>
 
@@ -117,8 +113,8 @@ export default async function TransportOptionsPage({
         <div
           className={`mt-8 rounded-2xl border px-5 py-4 text-sm font-semibold ${
             message.type === "success"
-              ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-300"
-              : "border-red-300/20 bg-red-300/10 text-red-300"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-red-200 bg-red-50 text-red-700"
           }`}
         >
           {message.text}
@@ -126,23 +122,23 @@ export default async function TransportOptionsPage({
       )}
 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-5">
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <p className="text-sm text-slate-400">Total Options</p>
-          <h2 className="mt-2 text-3xl font-bold text-white">{transportOptions.length}</h2>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-sm text-slate-500">Total Options</p>
+          <h2 className="mt-2 text-3xl font-bold text-slate-950">{transportOptions.length}</h2>
         </div>
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <p className="text-sm text-slate-400">Active Options</p>
-          <h2 className="mt-2 text-3xl font-bold text-cyan-300">{activeCount}</h2>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-sm text-slate-500">Active Options</p>
+          <h2 className="mt-2 text-3xl font-bold text-blue-600">{activeCount}</h2>
         </div>
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <p className="text-sm text-slate-400">Assigned Orders</p>
-          <h2 className="mt-2 text-3xl font-bold text-emerald-300">{assignedCount}</h2>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-sm text-slate-500">Assigned Orders</p>
+          <h2 className="mt-2 text-3xl font-bold text-emerald-700">{assignedCount}</h2>
         </div>
       </div>
 
-      <section className="mt-8 rounded-3xl border border-cyan-300/20 bg-cyan-300/[0.06] p-5 sm:p-6">
-        <h2 className="text-xl font-bold text-white">Add Transport Option</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
+      <section className="mt-8 rounded-2xl border border-blue-100 bg-blue-50 p-5 sm:p-6">
+        <h2 className="text-xl font-bold text-slate-950">Add Transport Option</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">
           Add options like Auto, Tempo, Truck, Courier, Own Vehicle, or any custom transport method.
         </p>
 
@@ -153,7 +149,7 @@ export default async function TransportOptionsPage({
               name="name"
               placeholder="Tempo"
               maxLength={80}
-              className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300"
+              className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-blue-500"
               required
             />
           </label>
@@ -164,7 +160,7 @@ export default async function TransportOptionsPage({
               name="description"
               placeholder="Local delivery by tempo or mini truck"
               maxLength={300}
-              className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300"
+              className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-blue-500"
             />
           </label>
 
@@ -177,25 +173,25 @@ export default async function TransportOptionsPage({
               max={9999}
               step={1}
               defaultValue={60}
-              className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300"
+              className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-blue-500"
             />
           </label>
 
-          <button type="submit" className="h-12 rounded-2xl bg-cyan-300 px-5 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+          <button type="submit" className="h-12 rounded-2xl bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-700">
             Add Option
           </button>
         </form>
       </section>
 
-      <section className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
-        <div className="border-b border-white/10 p-5 sm:p-6">
-          <h2 className="text-xl font-bold text-white">Transport Options List</h2>
-          <p className="mt-2 text-sm text-slate-400">
+      <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 p-5 sm:p-6">
+          <h2 className="text-xl font-bold text-slate-950">Transport Options</h2>
+          <p className="mt-2 text-sm text-slate-500">
             Disable an option instead of deleting it so old dispatch history remains clean.
           </p>
         </div>
 
-        <div className="divide-y divide-white/10">
+        <div className="divide-y divide-slate-100">
           {transportOptions.map((option) => (
             <article key={option.id} className="p-5 sm:p-6">
               <form action={updateTransportOptionAction} className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_110px_auto_auto] xl:items-end">
@@ -203,25 +199,25 @@ export default async function TransportOptionsPage({
 
                 <label className="block">
                   <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Name</span>
-                  <input name="name" defaultValue={option.name} maxLength={80} className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300" />
+                  <input name="name" defaultValue={option.name} maxLength={80} className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-blue-500" />
                 </label>
 
                 <label className="block">
                   <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Description</span>
-                  <input name="description" defaultValue={option.description ?? ""} maxLength={300} className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300" />
+                  <input name="description" defaultValue={option.description ?? ""} maxLength={300} className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-blue-500" />
                 </label>
 
                 <label className="block">
                   <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Order</span>
-                  <input name="sortOrder" type="number" min={0} max={9999} step={1} defaultValue={option.sortOrder} className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 text-sm text-white outline-none transition focus:border-cyan-300" />
+                  <input name="sortOrder" type="number" min={0} max={9999} step={1} defaultValue={option.sortOrder} className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-blue-500" />
                 </label>
 
-                <button type="submit" className="h-12 rounded-2xl border border-cyan-300/30 px-5 text-sm font-bold text-cyan-300 transition hover:bg-cyan-300 hover:text-slate-950">
+                <button type="submit" className="h-12 rounded-2xl border border-blue-200 px-5 text-sm font-bold text-blue-600 transition hover:bg-blue-700 hover:text-white">
                   Save
                 </button>
 
                 <div className="flex gap-3 xl:justify-end">
-                  <span className={`inline-flex h-12 items-center rounded-2xl px-4 text-sm font-bold ${option.isActive ? "bg-emerald-300/10 text-emerald-300" : "bg-red-300/10 text-red-300"}`}>
+                  <span className={`inline-flex h-12 items-center rounded-2xl px-4 text-sm font-bold ${option.isActive ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
                     {option.isActive ? "Active" : "Disabled"}
                   </span>
                 </div>
@@ -235,7 +231,7 @@ export default async function TransportOptionsPage({
                 <form action={toggleTransportOptionAction}>
                   <input type="hidden" name="id" value={option.id} />
                   <input type="hidden" name="nextActive" value={option.isActive ? "false" : "true"} />
-                  <button type="submit" className={`rounded-2xl px-4 py-2 text-xs font-bold transition ${option.isActive ? "border border-red-300/30 text-red-300 hover:bg-red-300 hover:text-slate-950" : "border border-emerald-300/30 text-emerald-300 hover:bg-emerald-300 hover:text-slate-950"}`}>
+                  <button type="submit" className={`rounded-2xl px-4 py-2 text-xs font-bold transition ${option.isActive ? "border border-red-300/30 text-red-700 hover:bg-red-300 hover:text-slate-950" : "border border-emerald-200 text-emerald-700 hover:bg-emerald-300 hover:text-slate-950"}`}>
                     {option.isActive ? "Disable" : "Enable"}
                   </button>
                 </form>
