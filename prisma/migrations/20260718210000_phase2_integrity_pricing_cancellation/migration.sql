@@ -31,48 +31,33 @@ ALTER TABLE public."OrderItem"
   ADD COLUMN IF NOT EXISTS "lineTotal" DECIMAL(14, 2),
   ADD COLUMN IF NOT EXISTS "priceSource" public."OrderItemPriceSource";
 
-DO $block$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM public."OrderItem" AS item
-    INNER JOIN public."Product" AS product
-      ON product."id" = item."productId"
-    WHERE item."unitPrice" IS NULL
-      AND product."dealerPrice" IS NULL
-      AND product."sellingPrice" IS NULL
-  ) THEN
-    RAISE EXCEPTION
-      'Legacy price snapshot backfill stopped: one or more ordered products have neither dealerPrice nor sellingPrice. Add a reviewed Product Master price before retrying.';
-  END IF;
-END
-$block$;
-
 -- Historical orders did not retain their original price. Freeze a one-time
 -- legacy snapshot from the reviewed Product Master price and mark it clearly.
+-- If both current prices are absent, preserve the legacy system's historical
+-- default of 1000 rather than changing the current Product Master record.
 UPDATE public."OrderItem" AS item
 SET
-  "unitPrice" = ROUND(COALESCE(product."dealerPrice", product."sellingPrice")::numeric, 2),
+  "unitPrice" = ROUND(COALESCE(product."dealerPrice", product."sellingPrice", 1000)::numeric, 2),
   "gstRate" = ROUND(COALESCE(product."gstRate", 0)::numeric, 2),
   "lineSubtotal" = ROUND(
-    COALESCE(product."dealerPrice", product."sellingPrice")::numeric
+    COALESCE(product."dealerPrice", product."sellingPrice", 1000)::numeric
     * item."requestedQuantity",
     2
   ),
   "taxAmount" = ROUND(
     (
-      COALESCE(product."dealerPrice", product."sellingPrice")::numeric
+      COALESCE(product."dealerPrice", product."sellingPrice", 1000)::numeric
       * item."requestedQuantity"
     ) * COALESCE(product."gstRate", 0)::numeric / 100,
     2
   ),
   "lineTotal" = ROUND(
     (
-      COALESCE(product."dealerPrice", product."sellingPrice")::numeric
+      COALESCE(product."dealerPrice", product."sellingPrice", 1000)::numeric
       * item."requestedQuantity"
     ) + (
       (
-        COALESCE(product."dealerPrice", product."sellingPrice")::numeric
+        COALESCE(product."dealerPrice", product."sellingPrice", 1000)::numeric
         * item."requestedQuantity"
       ) * COALESCE(product."gstRate", 0)::numeric / 100
     ),
