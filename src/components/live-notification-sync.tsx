@@ -23,6 +23,7 @@ type LiveNotificationResponse = {
 const VISIBLE_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_POLL_INTERVAL_MS = 15_000;
 const TOAST_DURATION_MS = 8_000;
+const BASE_DOCUMENT_TITLE = "Sanghvi ERP";
 
 async function showSystemNotification(notification: LiveNotification) {
   if (
@@ -57,12 +58,61 @@ export function LiveNotificationSync({
   const router = useRouter();
   const knownIds = useRef(new Set(initialRecipientIds));
   const unreadCount = useRef(initialUnreadCount);
+  const [liveUnreadCount, setLiveUnreadCount] = useState(initialUnreadCount);
   const [toasts, setToasts] = useState<LiveNotification[]>([]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    unreadCount.current = initialUnreadCount;
+    setLiveUnreadCount(initialUnreadCount);
+  }, [initialUnreadCount]);
+
+  useEffect(() => {
+    const countLabel =
+      liveUnreadCount > 99 ? "99+" : String(liveUnreadCount);
+    const expectedTitle =
+      liveUnreadCount > 0
+        ? `(${countLabel}) ${BASE_DOCUMENT_TITLE}`
+        : BASE_DOCUMENT_TITLE;
+    const navigatorWithBadging = navigator as Navigator & {
+      setAppBadge?: (contents?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+
+    function applyUnreadTitle() {
+      if (document.title !== expectedTitle) {
+        document.title = expectedTitle;
+      }
+    }
+
+    applyUnreadTitle();
+
+    if (liveUnreadCount > 0) {
+      void navigatorWithBadging.setAppBadge?.(liveUnreadCount);
+    } else {
+      void navigatorWithBadging.clearAppBadge?.();
+    }
+
+    const titleObserver = new MutationObserver(applyUnreadTitle);
+    titleObserver.observe(document.head, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+
+    return () => titleObserver.disconnect();
+  }, [liveUnreadCount]);
+
+  useEffect(
+    () => () => {
+      document.title = BASE_DOCUMENT_TITLE;
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -177,6 +227,7 @@ export function LiveNotificationSync({
           snapshot.unreadCount !== unreadCount.current
         ) {
           unreadCount.current = snapshot.unreadCount;
+          setLiveUnreadCount(snapshot.unreadCount);
           router.refresh();
         }
       } catch {
