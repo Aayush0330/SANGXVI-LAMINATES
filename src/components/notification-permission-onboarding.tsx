@@ -83,7 +83,7 @@ export function NotificationPermissionOnboarding() {
         <button
           type="button"
           onClick={dismiss}
-          aria-label="Not now"
+          aria-label="Remind me later"
           className="absolute right-4 top-5 flex h-9 w-9 items-center justify-center rounded-full text-xl leading-none text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"
         >
           ×
@@ -106,7 +106,7 @@ export function NotificationPermissionOnboarding() {
                 id="notification-permission-title"
                 className="mt-1 text-xl font-black text-slate-950 dark:text-white"
               >
-                Never miss an order update
+                Stay informed
               </h2>
             </div>
           </div>
@@ -115,13 +115,14 @@ export function NotificationPermissionOnboarding() {
             id="notification-permission-description"
             className="mt-5 text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300"
           >
-            Allow alerts to receive QC handoffs, order updates, assignments, and
-            urgent workflow messages without refreshing the screen.
+            Enable notifications to receive timely updates about orders,
+            assigned tasks, approvals, deliveries, and other important business
+            activity.
           </p>
 
           <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold leading-5 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-200">
-            In-app popups are already active. Allowing notifications also shows
-            system alerts when this screen is in the background.
+            Alerts are personalised to your role and access permissions. You
+            will only receive updates relevant to your work.
           </div>
 
           <button
@@ -143,7 +144,7 @@ export function NotificationPermissionOnboarding() {
               <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
               <path d="M10 17a2 2 0 0 0 4 0" />
             </svg>
-            {requesting ? "Enabling alerts…" : "Allow notifications"}
+            {requesting ? "Enabling notifications…" : "Enable notifications"}
           </button>
 
           <button
@@ -151,7 +152,7 @@ export function NotificationPermissionOnboarding() {
             onClick={dismiss}
             className="mt-3 h-11 w-full rounded-xl text-sm font-bold text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
           >
-            Not now
+            Remind me later
           </button>
         </div>
       </section>
