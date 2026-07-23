@@ -40,6 +40,7 @@ async function showSystemNotification(notification: LiveNotification) {
     icon: "/icon-192.png",
     badge: "/icon-192.png",
     tag: notification.id,
+    silent: false,
     data: {
       href: notification.href ?? "/",
     },
@@ -66,7 +67,52 @@ export function LiveNotificationSync({
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
+    let audioContext: AudioContext | null = null;
     const toastTimers = new Set<number>();
+
+    function unlockNotificationSound() {
+      audioContext ??= new AudioContext();
+
+      if (audioContext.state === "suspended") {
+        void audioContext.resume();
+      }
+    }
+
+    function playNotificationSound() {
+      if (
+        document.visibilityState !== "visible" ||
+        !audioContext ||
+        audioContext.state !== "running"
+      ) {
+        return;
+      }
+
+      const startAt = audioContext.currentTime;
+      const tones = [
+        { frequency: 880, delay: 0, duration: 0.16, volume: 0.075 },
+        { frequency: 1174.66, delay: 0.11, duration: 0.22, volume: 0.065 },
+      ];
+
+      for (const tone of tones) {
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        const toneStart = startAt + tone.delay;
+        const toneEnd = toneStart + tone.duration;
+
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(tone.frequency, toneStart);
+        gain.gain.setValueAtTime(0.0001, toneStart);
+        gain.gain.exponentialRampToValueAtTime(
+          tone.volume,
+          toneStart + 0.018,
+        );
+        gain.gain.exponentialRampToValueAtTime(0.0001, toneEnd);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(toneStart);
+        oscillator.stop(toneEnd);
+      }
+    }
 
     function queueNextPoll() {
       if (cancelled) {
@@ -117,6 +163,10 @@ export function LiveNotificationSync({
           knownIds.current.add(notification.id);
         }
 
+        if (newNotifications.length > 0) {
+          playNotificationSound();
+        }
+
         for (const notification of newNotifications) {
           addToast(notification);
           void showSystemNotification(notification);
@@ -150,10 +200,16 @@ export function LiveNotificationSync({
 
     timer = window.setTimeout(poll, VISIBLE_POLL_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("pointerdown", unlockNotificationSound, {
+      passive: true,
+    });
+    document.addEventListener("keydown", unlockNotificationSound);
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("pointerdown", unlockNotificationSound);
+      document.removeEventListener("keydown", unlockNotificationSound);
 
       if (timer) {
         window.clearTimeout(timer);
@@ -161,6 +217,10 @@ export function LiveNotificationSync({
 
       for (const toastTimer of toastTimers) {
         window.clearTimeout(toastTimer);
+      }
+
+      if (audioContext) {
+        void audioContext.close();
       }
     };
   }, [router]);
