@@ -116,7 +116,10 @@ export default async function FieldLayout({
               currentPortal="field"
               variant="compact"
             />
-            <NotificationCenter currentUser={currentUser} />
+            <NotificationCenter
+              currentUser={currentUser}
+              enableLiveSync={false}
+            />
             <ThemeToggle />
             <LogoutButton variant="compact" />
           </div>

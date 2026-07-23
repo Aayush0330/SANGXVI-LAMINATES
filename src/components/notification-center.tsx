@@ -6,7 +6,9 @@ import {
   markSingleNotificationReadAction,
 } from "@/app/notifications/actions";
 import type { AppUser } from "@/lib/current-user";
+import { LiveNotificationSync } from "@/components/live-notification-sync";
 import { NotificationFeed } from "@/components/notification-feed";
+import { NotificationPermissionButton } from "@/components/notification-permission-button";
 import { NotificationPopover } from "@/components/notification-popover";
 import {
   formatNotificationTime,
@@ -145,51 +147,65 @@ function NotificationCard({
 
 export async function NotificationCenter({
   currentUser,
+  enableLiveSync = true,
 }: {
   currentUser: AppUser;
+  enableLiveSync?: boolean;
 }) {
   const { unreadCount, readCount, notifications } =
     await getNotificationSummaryForUser(currentUser, 12);
 
   return (
-    <NotificationPopover unreadCount={unreadCount}>
-      <NotificationFeed
-        items={notifications.map((notification) => ({
-          id: notification.recipientId,
-          isUnread: !notification.readAt,
-          content: (
-            <NotificationCard
-              key={notification.recipientId}
-              notification={notification}
-            />
-          ),
-        }))}
-        allEmptyState={<EmptyState />}
-        markAllControl={
-          unreadCount > 0 ? (
-            <form action={markMyNotificationsReadAction}>
-              <button className="inline-flex items-center gap-2 text-sm font-black text-[#20243a] transition hover:text-blue-600 dark:text-slate-100 dark:hover:text-blue-300">
-                Mark all as read
-                <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-current">
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 24 24"
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="m6 12 4 4 8-8" />
-                  </svg>
-                </span>
-              </button>
-            </form>
-          ) : null
-        }
-        footerActions={
-          <div className="flex flex-wrap items-center gap-2">
+    <>
+      {enableLiveSync ? (
+        <LiveNotificationSync
+          initialRecipientIds={notifications.map(
+            (notification) => notification.recipientId,
+          )}
+          initialUnreadCount={unreadCount}
+        />
+      ) : null}
+
+      <NotificationPopover unreadCount={unreadCount}>
+        <NotificationFeed
+          items={notifications.map((notification) => ({
+            id: notification.recipientId,
+            isUnread: !notification.readAt,
+            content: (
+              <NotificationCard
+                key={notification.recipientId}
+                notification={notification}
+              />
+            ),
+          }))}
+          allEmptyState={<EmptyState />}
+          markAllControl={
+            unreadCount > 0 ? (
+              <form action={markMyNotificationsReadAction}>
+                <button className="inline-flex items-center gap-2 text-sm font-black text-[#20243a] transition hover:text-blue-600 dark:text-slate-100 dark:hover:text-blue-300">
+                  Mark all as read
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-current">
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="m6 12 4 4 8-8" />
+                    </svg>
+                  </span>
+                </button>
+              </form>
+            ) : null
+          }
+          footerActions={
+            <div className="flex flex-wrap items-center gap-2">
+              <NotificationPermissionButton />
+
               {readCount > 0 ? (
                 <form action={clearReadNotificationsAction}>
                   <button className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-rose-400/30 dark:hover:bg-rose-500/10 dark:hover:text-rose-300">
@@ -203,10 +219,11 @@ export async function NotificationCenter({
                   Clear 30+ days
                 </button>
               </form>
-          </div>
-        }
-        readCount={readCount}
-      />
-    </NotificationPopover>
+            </div>
+          }
+          readCount={readCount}
+        />
+      </NotificationPopover>
+    </>
   );
 }

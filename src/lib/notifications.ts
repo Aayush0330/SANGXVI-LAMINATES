@@ -420,7 +420,7 @@ export async function createWorkflowNotification({
 }
 
 export async function getNotificationSummaryForUser(
-  currentUser: AppUser,
+  currentUser: Pick<AppUser, "id">,
   limit = 12,
 ): Promise<NotificationSummary> {
   noStore();

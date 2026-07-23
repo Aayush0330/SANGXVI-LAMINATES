@@ -187,7 +187,10 @@ export default async function InternalLayout({
               currentPortal="internal"
               variant="compact"
             />
-            <NotificationCenter currentUser={currentUser} />
+            <NotificationCenter
+              currentUser={currentUser}
+              enableLiveSync={false}
+            />
             <ThemeToggle />
             <LogoutButton variant="compact" />
           </div>
