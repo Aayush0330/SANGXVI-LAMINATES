@@ -11,6 +11,18 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+## Install on a phone
+
+The ERP is configured as a Progressive Web App (PWA). Production must be served
+over HTTPS for phone installation.
+
+- Android (Chrome): open the ERP, tap **Install App**, and confirm.
+- iPhone (Safari): open the ERP, tap **Share**, then **Add to Home Screen**.
+
+The installed app uses the same ERP server and database as the desktop site.
+Business data is not stored for offline use; if the phone loses connectivity,
+the app shows a safe reconnect screen.
+
 ## Database
 
 ```bash
