@@ -28,9 +28,17 @@ function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
-function receivingUrl(type: "error" | "success", value: string) {
-  return `/internal/order-receiving?${type}=${encodeURIComponent(value)}`;
+function receivingUrl(
+  type: "error" | "success",
+  value: string,
+  orderId?: string,
+) {
+  const params = new URLSearchParams({ [type]: value });
+  if (orderId) params.set("order", orderId);
+  return `/internal/order-receiving?${params.toString()}`;
 }
+
+class ReceivingStateError extends Error {}
 
 async function assertReceivingAccess() {
   const { currentUser, hasAccess } = await checkPermission(
@@ -85,16 +93,21 @@ export async function confirmOrderReceivedAction(formData: FormData) {
     });
 
     revalidatePath("/internal/order-receiving");
-    redirect(receivingUrl("success", "receiving-updated"));
+    redirect(receivingUrl("success", "receiving-updated", order.id));
   }
 
   if (order.status !== OrderStatus.NEW_ORDER) {
-    redirect(receivingUrl("error", "invalid-status"));
+    redirect(receivingUrl("error", "invalid-status", order.id));
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: order.id },
+  try {
+    await prisma.$transaction(async (tx) => {
+    const transitioned = await tx.order.updateMany({
+      where: {
+        id: order.id,
+        status: OrderStatus.NEW_ORDER,
+        receivedAt: null,
+      },
       data: {
         status: OrderStatus.PENDING_TEAM_ASSIGNMENT,
         receivedById: currentUser.id,
@@ -103,6 +116,7 @@ export async function confirmOrderReceivedAction(formData: FormData) {
         receivingNotes: receivingNotes || null,
       },
     });
+    if (transitioned.count !== 1) throw new ReceivingStateError();
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
@@ -135,7 +149,13 @@ export async function confirmOrderReceivedAction(formData: FormData) {
       recipientRoles: ["owner", "manager", "order_team"],
       priority: "HIGH_ALERT",
     });
-  });
+    });
+  } catch (error) {
+    if (error instanceof ReceivingStateError) {
+      redirect(receivingUrl("error", "invalid-status", order.id));
+    }
+    throw error;
+  }
 
   await createSecurityAuditLog({
     eventType: "ORDER_RECEIVED",
@@ -151,7 +171,7 @@ export async function confirmOrderReceivedAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect(receivingUrl("success", "order-received"));
+  redirect(receivingUrl("success", "order-received", order.id));
 }
 
 export async function assignPhysicalTeamsAction(formData: FormData) {
@@ -190,7 +210,7 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
   ];
 
   if (!assignableStatuses.includes(order.status)) {
-    redirect(receivingUrl("error", "assignment-status-locked"));
+    redirect(receivingUrl("error", "assignment-status-locked", order.id));
   }
 
   if (
@@ -198,11 +218,11 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
       (assignment) => assignment.status !== PhysicalCheckStatus.ASSIGNED,
     )
   ) {
-    redirect(receivingUrl("error", "assignment-already-started"));
+    redirect(receivingUrl("error", "assignment-already-started", order.id));
   }
 
   if (order.items.length === 0) {
-    redirect(receivingUrl("error", "no-order-items"));
+    redirect(receivingUrl("error", "no-order-items", order.id));
   }
 
   const itemAssignments = order.items.map((item) => ({
@@ -211,7 +231,7 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
   }));
 
   if (itemAssignments.some(({ teamId }) => !teamId)) {
-    redirect(receivingUrl("error", "all-products-require-team"));
+    redirect(receivingUrl("error", "all-products-require-team", order.id));
   }
 
   const uniqueTeamIds = Array.from(
@@ -236,7 +256,7 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
     teams.length !== uniqueTeamIds.length ||
     teams.some((team) => team.members.length === 0)
   ) {
-    redirect(receivingUrl("error", "invalid-physical-team"));
+    redirect(receivingUrl("error", "invalid-physical-team", order.id));
   }
 
   const teamById = new Map(teams.map((team) => [team.id, team]));
@@ -249,9 +269,33 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
     ]);
   }
 
-  await prisma.$transaction(async (tx) => {
-    if (order.physicalAssignments.length > 0) {
-      for (const previousAssignment of order.physicalAssignments) {
+  try {
+    await prisma.$transaction(async (tx) => {
+    const lockedRows = await tx.$queryRaw<Array<{ status: OrderStatus }>>`
+      SELECT "status"
+      FROM public."Order"
+      WHERE "id" = ${order.id}
+      FOR UPDATE
+    `;
+    const lockedStatus = lockedRows[0]?.status;
+    if (!lockedStatus || !assignableStatuses.includes(lockedStatus)) {
+      throw new ReceivingStateError();
+    }
+
+    const currentAssignments = await tx.orderPhysicalAssignment.findMany({
+      where: { orderId: order.id },
+      select: { id: true, status: true },
+    });
+    if (
+      currentAssignments.some(
+        (assignment) => assignment.status !== PhysicalCheckStatus.ASSIGNED,
+      )
+    ) {
+      throw new ReceivingStateError();
+    }
+
+    if (currentAssignments.length > 0) {
+      for (const previousAssignment of currentAssignments) {
         await setAutomatedTaskStatus({
           client: tx,
           automationKey: workflowTaskKeys.physicalVerification(previousAssignment.id),
@@ -297,15 +341,16 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
       });
     }
 
-    await tx.order.update({
-      where: { id: order.id },
+    const transitioned = await tx.order.updateMany({
+      where: { id: order.id, status: lockedStatus },
       data: { status: OrderStatus.PHYSICAL_CHECK_ASSIGNED },
     });
+    if (transitioned.count !== 1) throw new ReceivingStateError();
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
       orderId: order.id,
-      fromStatus: order.status,
+      fromStatus: lockedStatus,
       toStatus: OrderStatus.PHYSICAL_CHECK_ASSIGNED,
       title: "Physical Teams Assigned",
       description: `${itemAssignments.length} product line(s) assigned across ${uniqueTeamIds.length} Physical Dispatch Team(s).`,
@@ -340,7 +385,13 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
         priority: "HIGH_ALERT",
       });
     }
-  });
+    });
+  } catch (error) {
+    if (error instanceof ReceivingStateError) {
+      redirect(receivingUrl("error", "assignment-status-locked", order.id));
+    }
+    throw error;
+  }
 
   await createSecurityAuditLog({
     eventType: "PHYSICAL_TEAM_ASSIGNED",
@@ -357,5 +408,5 @@ export async function assignPhysicalTeamsAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect(receivingUrl("success", "teams-assigned"));
+  redirect(receivingUrl("success", "teams-assigned", order.id));
 }

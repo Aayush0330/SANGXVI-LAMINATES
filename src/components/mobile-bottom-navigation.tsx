@@ -182,18 +182,18 @@ export function MobileBottomNavigation({
 
   const shellClass =
     theme === "light"
-      ? "border-slate-200 bg-white/95 text-slate-500 shadow-[0_-12px_40px_rgba(15,23,42,0.08)]"
-      : "border-slate-200 bg-white/95 text-slate-500 shadow-[0_-12px_40px_rgba(15,23,42,0.08)]";
+      ? "border-slate-200 bg-white/95 text-slate-500 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-slate-950/95 dark:text-slate-400 dark:shadow-[0_-12px_40px_rgba(0,0,0,0.28)]"
+      : "border-slate-200 bg-white/95 text-slate-500 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-slate-950/95 dark:text-slate-400 dark:shadow-[0_-12px_40px_rgba(0,0,0,0.28)]";
 
   const activeClass =
     theme === "light"
-      ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100"
-      : "bg-blue-50 text-blue-700 ring-1 ring-blue-100";
+      ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100 dark:bg-blue-500/15 dark:text-blue-200 dark:ring-blue-500/25"
+      : "bg-blue-50 text-blue-700 ring-1 ring-blue-100 dark:bg-blue-500/15 dark:text-blue-200 dark:ring-blue-500/25";
 
   const inactiveClass =
     theme === "light"
-      ? "hover:bg-slate-100 hover:text-slate-950"
-      : "hover:bg-slate-100 hover:text-slate-950";
+      ? "hover:bg-slate-100 hover:text-slate-950 dark:hover:bg-white/10 dark:hover:text-white"
+      : "hover:bg-slate-100 hover:text-slate-950 dark:hover:bg-white/10 dark:hover:text-white";
 
   return (
     <nav

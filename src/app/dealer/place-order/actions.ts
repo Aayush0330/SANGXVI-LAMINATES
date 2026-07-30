@@ -11,6 +11,11 @@ import { OrderStatus, Prisma } from "@/generated/prisma/client";
 import { createOrderPriceSnapshot } from "@/lib/order-pricing";
 import { ensureOrderReceivingTask } from "@/lib/workflow-tasks";
 import { deleteDealerCart, getDealerCart } from "@/lib/dealer-cart-db";
+import { syncOrderCalendarById } from "@/lib/google-calendar-sync";
+import {
+  deriveOrderPayment,
+  normalizeOrderPaymentTag,
+} from "@/lib/order-payment";
 
 function generateOrderNumber() {
   const date = new Date();
@@ -67,6 +72,7 @@ export async function createDealerOrderAction(formData: FormData) {
 
   const items = cart.items.map((item) => ({ productId: item.productId, quantity: item.quantity }));
   const notes = cart.notes?.trim() ?? "";
+  const paymentTag = normalizeOrderPaymentTag(formData.get("paymentTag"));
 
   if (items.length > 50 || notes.length > 1000) redirect(`${placeOrderPath}?error=invalid-items`);
 
@@ -251,11 +257,22 @@ export async function createDealerOrderAction(formData: FormData) {
       return { status: "stock-changed" as const };
     }
 
+    const payment = deriveOrderPayment({
+      orderAmount: transactionItems.reduce(
+        (sum, item) => sum + Number(item.priceSnapshot?.lineTotal ?? 0),
+        0,
+      ),
+      amountReceived: 0,
+    });
+
     const order = await tx.order.create({
       data: {
         orderNumber,
         dealerId: dealer.id,
         notes: notes || null,
+        paymentTag,
+        ...payment,
+        orderCalendarStatus: "READY_TO_SYNC",
         items: {
           create: transactionItems.map((item) => {
             if (!item.priceSnapshot) throw new Error("ORDER_PRICE_SNAPSHOT_MISSING");
@@ -308,7 +325,7 @@ export async function createDealerOrderAction(formData: FormData) {
 
     await deleteDealerCart(tx, latestCart.id);
 
-    return { status: "created" as const };
+    return { status: "created" as const, orderId: order.id };
   });
 
   if (transactionResult.status === "conflict") {
@@ -328,6 +345,8 @@ export async function createDealerOrderAction(formData: FormData) {
     revalidatePath(placeOrderPath);
     redirect(`${placeOrderPath}?error=cart-stock-changed`);
   }
+
+  await syncOrderCalendarById(transactionResult.orderId);
 
   revalidateOrderPaths();
   redirect(`${placeOrderPath}?success=order-created&orderNumber=${encodeURIComponent(orderNumber)}`);

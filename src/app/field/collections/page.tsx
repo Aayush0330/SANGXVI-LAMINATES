@@ -31,8 +31,10 @@ const selectStyle = {
   backgroundSize: "18px 18px",
 } as const;
 
-function isInternalCollectionRole(role: string) {
-  return role === "owner" || role === "manager" || role === "accountant";
+function hasInternalCollectionRole(roles: readonly string[]) {
+  return roles.some(
+    (role) => role === "owner" || role === "manager" || role === "accountant",
+  );
 }
 
 function getMessage(error?: string, success?: string) {
@@ -88,7 +90,7 @@ export default async function FieldCollectionsPage({
   }
 
   const collections = await prisma.collectionAssignment.findMany({
-    where: isInternalCollectionRole(currentUser.role)
+    where: hasInternalCollectionRole(currentUser.roles)
       ? undefined
       : { assignedToId: currentUser.id },
     include: {

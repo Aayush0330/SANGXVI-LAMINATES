@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
+import { generateDailyArchiveAction } from "./actions";
 
 type BackupRow = {
   id: string;
@@ -162,12 +163,18 @@ export default async function InternalBackupsPage() {
           <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
             Creates a compressed SQL backup, SHA-256 manifest and database history record before downloading.
           </p>
-          <a
-            href="/internal/backups/download"
+          <form
+            action="/internal/backups/download"
+            method="post"
+            className="mt-5"
+          >
+          <button
+            type="submit"
             className="mt-5 inline-flex rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-700 dark:bg-cyan-400 dark:text-slate-950"
           >
             Generate & Download Backup
-          </a>
+          </button>
+          </form>
         </div>
 
         <div className="rounded-3xl border border-purple-200 bg-gradient-to-br from-white to-purple-50 p-6 dark:border-purple-500/20 dark:from-slate-900 dark:to-purple-950/30">
@@ -178,16 +185,25 @@ export default async function InternalBackupsPage() {
             Generated every day automatically
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            The previous business day is archived automatically at 2:00 AM IST as readable HTML and JSON. Opening the download also generates the latest archive if the schedule was missed.
+            The previous business day is archived automatically at 2:00 AM IST as readable HTML and JSON. A missed archive must be generated explicitly.
           </p>
-          <Link
-            href="/internal/backups/daily/latest"
-            className="mt-5 inline-flex rounded-2xl bg-purple-600 px-5 py-3 text-sm font-black text-white transition hover:bg-purple-700"
-          >
-            {latestDailyArchive
-              ? "Download Latest Daily Archive"
-              : "Generate & Download Latest Archive"}
-          </Link>
+          {latestDailyArchive ? (
+            <Link
+              href="/internal/backups/daily/latest"
+              className="mt-5 inline-flex rounded-2xl bg-purple-600 px-5 py-3 text-sm font-black text-white transition hover:bg-purple-700"
+            >
+              Download Latest Daily Archive
+            </Link>
+          ) : (
+            <form action={generateDailyArchiveAction} className="mt-5">
+              <button
+                type="submit"
+                className="inline-flex rounded-2xl bg-purple-600 px-5 py-3 text-sm font-black text-white transition hover:bg-purple-700"
+              >
+                Generate Latest Archive
+              </button>
+            </form>
+          )}
         </div>
       </section>
 

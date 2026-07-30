@@ -14,10 +14,12 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is required to run the Prisma seed.");
 }
 
-if (!connectionString.startsWith("postgres://") &&
-    !connectionString.startsWith("postgresql://")) {
+if (
+  !connectionString.startsWith("postgres://") &&
+  !connectionString.startsWith("postgresql://")
+) {
   throw new Error(
-    "DATABASE_URL must be a PostgreSQL connection string because the Prisma schema uses the postgresql provider."
+    "DATABASE_URL must be a PostgreSQL connection string because the Prisma schema uses the postgresql provider.",
   );
 }
 
@@ -25,9 +27,15 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg(connectionString),
 });
 
+const seedMode = (process.env.SEED_MODE || "bootstrap").trim().toLowerCase();
+if (!["bootstrap", "demo"].includes(seedMode)) {
+  throw new Error("SEED_MODE must be either bootstrap or demo.");
+}
+const demoMode = seedMode === "demo";
+
 const initialPassword =
   process.env.SEED_INITIAL_PASSWORD?.trim() ||
-  process.env.DEMO_PASSWORD?.trim();
+  (demoMode ? process.env.DEMO_PASSWORD?.trim() : undefined);
 
 if (!initialPassword) {
   throw new Error(
@@ -41,19 +49,38 @@ if (!isStrongEnoughPassword(initialPassword)) {
   );
 }
 
-const baseUsers = [
-  {
-    name: process.env.DEMO_OWNER_NAME || "Aayush Chandak",
-    email: process.env.SEED_OWNER_EMAIL || "owner@sanghvi.com",
-    role: UserRole.OWNER,
-    phone: "+91 98765 43210",
-  },
+const ownerEmail =
+  process.env.SEED_OWNER_EMAIL?.trim().toLowerCase() ||
+  (demoMode ? "owner@sanghvi.com" : "");
+
+if (
+  !ownerEmail ||
+  ownerEmail.length > 320 ||
+  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)
+) {
+  throw new Error(
+    "SEED_OWNER_EMAIL is required in bootstrap mode and must be a valid email address.",
+  );
+}
+
+const ownerUser = {
+  name:
+    process.env.SEED_OWNER_NAME ||
+    (demoMode ? process.env.DEMO_OWNER_NAME : undefined) ||
+    "Sanghvi ERP Owner",
+  email: ownerEmail,
+  role: UserRole.OWNER,
+  phone: process.env.SEED_OWNER_PHONE || null,
+};
+
+const demoUsers = [
   {
     name: "Amit Sharma",
     email: "amit@sanghvi.com",
     role: UserRole.MANAGER,
     phone: "+91 98765 43211",
-  },  {
+  },
+  {
     name: "Priya Dispatch",
     email: "priya@sanghvi.com",
     role: UserRole.DISPATCH_TEAM,
@@ -126,6 +153,10 @@ const baseProducts = [
     minimumStock: 20,
     maximumStock: 180,
     status: ProductStatus.AVAILABLE,
+    gstRate: 18,
+    purchasePrice: 650,
+    sellingPrice: 900,
+    dealerPrice: 850,
   },
   {
     code: "LAM-002",
@@ -138,6 +169,10 @@ const baseProducts = [
     minimumStock: 15,
     maximumStock: 120,
     status: ProductStatus.AVAILABLE,
+    gstRate: 18,
+    purchasePrice: 800,
+    sellingPrice: 1_100,
+    dealerPrice: 1_025,
   },
   {
     code: "LAM-003",
@@ -150,6 +185,10 @@ const baseProducts = [
     minimumStock: 25,
     maximumStock: 100,
     status: ProductStatus.AVAILABLE,
+    gstRate: 18,
+    purchasePrice: 525,
+    sellingPrice: 750,
+    dealerPrice: 700,
   },
   {
     code: "LAM-004",
@@ -162,6 +201,10 @@ const baseProducts = [
     minimumStock: 20,
     maximumStock: 80,
     status: ProductStatus.LOW_STOCK,
+    gstRate: 18,
+    purchasePrice: 875,
+    sellingPrice: 1_250,
+    dealerPrice: 1_175,
   },
   {
     code: "LAM-005",
@@ -174,6 +217,10 @@ const baseProducts = [
     minimumStock: 10,
     maximumStock: 60,
     status: ProductStatus.OUT_OF_STOCK,
+    gstRate: 18,
+    purchasePrice: 700,
+    sellingPrice: 995,
+    dealerPrice: 925,
   },
 ];
 
@@ -183,79 +230,100 @@ async function main() {
   }
   const passwordHash = hashPassword(initialPassword);
 
-  for (const user of baseUsers) {
-    await prisma.user.upsert({
-      where: { email: user.email.toLowerCase() },
-      update: {
-        name: user.name,
-        phone: user.phone,
-        role: user.role,
-        status: UserStatus.ACTIVE,
-      },
-      create: {
-        name: user.name,
-        email: user.email.toLowerCase(),
-        phone: user.phone,
-        role: user.role,
-        status: UserStatus.ACTIVE,
-        passwordHash,
-        mustChangePassword: true,
-      },
-    });
-  }
+  await prisma.$transaction(
+    async (tx) => {
+      const users = demoMode ? [ownerUser, ...demoUsers] : [ownerUser];
 
-  for (const categoryName of baseCategories) {
-    await prisma.productCategory.upsert({
-      where: { name: categoryName },
-      update: { isActive: true },
-      create: { name: categoryName },
-    });
-  }
+      for (const user of users) {
+        await tx.user.upsert({
+          where: { email: user.email.toLowerCase() },
+          update: {
+            name: user.name,
+            phone: user.phone,
+            role: user.role,
+            status: UserStatus.ACTIVE,
+          },
+          create: {
+            name: user.name,
+            email: user.email.toLowerCase(),
+            phone: user.phone,
+            role: user.role,
+            status: UserStatus.ACTIVE,
+            passwordHash,
+            mustChangePassword: true,
+          },
+        });
+      }
 
-  for (const brandName of baseBrands) {
-    await prisma.productBrand.upsert({
-      where: { name: brandName },
-      update: { isActive: true },
-      create: { name: brandName },
-    });
-  }
+      if (demoMode) {
+        for (const categoryName of baseCategories) {
+          await tx.productCategory.upsert({
+            where: { name: categoryName },
+            update: { isActive: true },
+            create: { name: categoryName },
+          });
+        }
+      }
 
-  for (const product of baseProducts) {
-    const [category, brand] = await Promise.all([
-      prisma.productCategory.findUniqueOrThrow({ where: { name: product.categoryName } }),
-      prisma.productBrand.findUniqueOrThrow({ where: { name: product.brandName } }),
-    ]);
+      if (demoMode) {
+        for (const brandName of baseBrands) {
+          await tx.productBrand.upsert({
+            where: { name: brandName },
+            update: { isActive: true },
+            create: { name: brandName },
+          });
+        }
+      }
 
-    await prisma.product.upsert({
-      where: { code: product.code },
-      update: {
-        name: product.name,
-        categoryId: category.id,
-        brandId: brand.id,
-        stack: product.stack,
-        unit: product.unit,
-        minimumStock: product.minimumStock,
-        maximumStock: product.maximumStock,
-        status: product.status,
-      },
-      create: {
-        code: product.code,
-        name: product.name,
-        categoryId: category.id,
-        brandId: brand.id,
-        stack: product.stack,
-        unit: product.unit,
-        quantity: product.quantity,
-        blocked: 0,
-        minimumStock: product.minimumStock,
-        maximumStock: product.maximumStock,
-        status: product.status,
-      },
-    });
-  }
+      if (demoMode) {
+        for (const product of baseProducts) {
+          const [category, brand] = await Promise.all([
+            tx.productCategory.findUniqueOrThrow({
+              where: { name: product.categoryName },
+            }),
+            tx.productBrand.findUniqueOrThrow({
+              where: { name: product.brandName },
+            }),
+          ]);
 
+          await tx.product.upsert({
+            where: { code: product.code },
+            update: {
+              name: product.name,
+              categoryId: category.id,
+              brandId: brand.id,
+              stack: product.stack,
+              unit: product.unit,
+              minimumStock: product.minimumStock,
+              maximumStock: product.maximumStock,
+              status: product.status,
+              gstRate: product.gstRate,
+              purchasePrice: product.purchasePrice,
+              sellingPrice: product.sellingPrice,
+              dealerPrice: product.dealerPrice,
+            },
+            create: {
+              code: product.code,
+              name: product.name,
+              categoryId: category.id,
+              brandId: brand.id,
+              stack: product.stack,
+              unit: product.unit,
+              quantity: product.quantity,
+              blocked: 0,
+              minimumStock: product.minimumStock,
+              maximumStock: product.maximumStock,
+              status: product.status,
+              gstRate: product.gstRate,
+              purchasePrice: product.purchasePrice,
+              sellingPrice: product.sellingPrice,
+              dealerPrice: product.dealerPrice,
+            },
+          });
+        }
+      }
 
-  await prisma.$executeRawUnsafe(`
+      await tx.$executeRaw`
     INSERT INTO "TransportOption" ("id", "name", "description", "isActive", "sortOrder", "createdAt", "updatedAt") VALUES
       ('transport_auto', 'Auto', 'Local auto delivery.', true, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
       ('transport_tempo', 'Tempo', 'Tempo / mini truck delivery.', true, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
@@ -264,9 +332,9 @@ async function main() {
       ('transport_courier', 'Courier', 'Courier / third-party parcel service.', true, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
       ('transport_other', 'Other', 'Custom transport option.', true, 99, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT ("name") DO NOTHING;
-  `);
+      `;
 
-  await prisma.$executeRawUnsafe(`
+      await tx.$executeRaw`
     INSERT INTO "WorkTeam" ("id", "name", "description", "isActive", "createdAt", "updatedAt") VALUES
       ('workteam_qc', 'QC Team', 'Quality checks before dispatch.', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
       ('workteam_collection', 'Collection Team', 'Payment and cheque collection follow-ups.', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
@@ -276,18 +344,19 @@ async function main() {
       ('workteam_order', 'Order Team', 'Order review and order-flow coordination.', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
       ('workteam_design_office', 'Design / Office Team', 'Office operations and internal design/admin tasks.', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT ("id") DO NOTHING;
-  `);
+      `;
 
-  await prisma.$executeRawUnsafe(`
+      await tx.$executeRaw`
     UPDATE "WorkTeam"
     SET
-      "teamType" = 'DISPATCH',
+      "teamType" = 'PHYSICAL_DISPATCH',
       "parentTeamId" = NULL,
       "updatedAt" = CURRENT_TIMESTAMP
     WHERE "id" = 'workteam_dispatch';
-  `);
+      `;
 
-  await prisma.$executeRawUnsafe(`
+      if (demoMode) {
+        await tx.$executeRaw`
     INSERT INTO "WorkTeamMember" (
       "id",
       "teamId",
@@ -309,7 +378,7 @@ async function main() {
     CROSS JOIN LATERAL (
       SELECT team."id"
       FROM "WorkTeam" AS team
-      WHERE team."teamType" = 'DISPATCH'
+      WHERE team."teamType" = 'PHYSICAL_DISPATCH'
       ORDER BY team."isActive" DESC, team."createdAt" ASC, team."id" ASC
       LIMIT 1
     ) AS physical_team
@@ -324,9 +393,17 @@ async function main() {
     SET
       "role" = 'LEAD',
       "updatedAt" = CURRENT_TIMESTAMP;
-  `);
+        `;
+      }
+    },
+    { maxWait: 10_000, timeout: 60_000 },
+  );
 
-  console.log("Production seed data completed.");
+  console.log(
+    demoMode
+      ? "Demo seed data completed."
+      : "Production bootstrap seed completed (owner and operational reference data only).",
+  );
   console.log("Seed completed. Password values are not printed.");
 }
 

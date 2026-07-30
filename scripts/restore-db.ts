@@ -315,15 +315,20 @@ async function restoreDatabase() {
 
   const psql = spawn(
     psqlPath,
-    ["--dbname", databaseUrl, "--set", "ON_ERROR_STOP=on"],
+    ["--set", "ON_ERROR_STOP=on"],
     {
-      env: process.env,
+      env: {
+        ...process.env,
+        PGDATABASE: databaseUrl,
+      },
       stdio: ["pipe", "inherit", "pipe"],
     },
   );
 
   psql.stderr.on("data", (chunk: Buffer) => {
-    errorOutput += chunk.toString();
+    if (errorOutput.length < 16_384) {
+      errorOutput += chunk.toString().slice(0, 16_384 - errorOutput.length);
+    }
   });
 
   const inputStream = backupPath.endsWith(".gz")

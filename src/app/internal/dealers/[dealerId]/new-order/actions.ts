@@ -11,6 +11,11 @@ import { recordOrderStatusHistory, type HistoryClient } from "@/lib/order-status
 import { createSecurityAuditLog } from "@/lib/security-audit";
 import { ensureOrderReceivingTask } from "@/lib/workflow-tasks";
 import { OrderSource, OrderStatus } from "@/generated/prisma/client";
+import { syncOrderCalendarById } from "@/lib/google-calendar-sync";
+import {
+  deriveOrderPayment,
+  normalizeOrderPaymentTag,
+} from "@/lib/order-payment";
 
 function clean(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
@@ -59,7 +64,15 @@ export async function createInternalDealerOrderAction(dealerId: string, formData
   const priority = ["NORMAL", "HIGH", "URGENT"].includes(priorityValue) ? priorityValue : "NORMAL";
   const requiredByValue = clean(formData.get("requiredBy"));
   const requiredBy = requiredByValue ? new Date(`${requiredByValue}T12:00:00+05:30`) : null;
+  const paymentTag = normalizeOrderPaymentTag(formData.get("paymentTag"));
+  const paymentTimelineValue = clean(formData.get("paymentTimelineAt"));
+  const paymentTimelineAt = paymentTimelineValue
+    ? new Date(`${paymentTimelineValue}T12:00:00+05:30`)
+    : null;
   if (requiredBy && Number.isNaN(requiredBy.getTime())) fail(dealerId, "invalid-required-date");
+  if (paymentTimelineAt && Number.isNaN(paymentTimelineAt.getTime())) {
+    fail(dealerId, "invalid-payment-date");
+  }
   if (notes.length > 1000) fail(dealerId, "notes-too-long");
 
   let submitted: SubmittedItem[] = [];
@@ -135,6 +148,14 @@ export async function createInternalDealerOrderAction(dealerId: string, formData
       };
     }
 
+    const payment = deriveOrderPayment({
+      orderAmount: latestSnapshots.reduce(
+        (sum, item) => sum + Number(item.snapshot?.lineTotal ?? 0),
+        0,
+      ),
+      amountReceived: 0,
+    });
+
     const created = await tx.order.create({
       data: {
         orderNumber,
@@ -145,6 +166,10 @@ export async function createInternalDealerOrderAction(dealerId: string, formData
         enteredByRole: currentUser.role,
         priority,
         requiredBy,
+        paymentTag,
+        paymentTimelineAt,
+        ...payment,
+        orderCalendarStatus: "READY_TO_SYNC",
         notes: notes || null,
         items: {
           create: latestSnapshots.map((item) => {
@@ -211,6 +236,8 @@ export async function createInternalDealerOrderAction(dealerId: string, formData
   }
 
   const order = transactionResult.order;
+
+  await syncOrderCalendarById(order.id);
 
   await createSecurityAuditLog({
     eventType: "INTERNAL_DEALER_ORDER_CREATED",

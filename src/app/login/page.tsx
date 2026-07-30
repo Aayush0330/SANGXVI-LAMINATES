@@ -13,17 +13,10 @@ function getLoginMessage(error?: string) {
     };
   }
 
-  if (error === "inactive-user") {
+  if (error === "too-many-attempts") {
     return {
       type: "error",
-      text: "This user account is inactive. Please contact the ERP owner.",
-    };
-  }
-
-  if (error === "password-not-set") {
-    return {
-      type: "error",
-      text: "Password is not set for this user. Owner can reset it from User Management.",
+      text: "Too many failed attempts. Please wait 15 minutes and try again.",
     };
   }
 
@@ -62,7 +55,10 @@ export default async function LoginPage({
   const message = getLoginMessage(params?.error);
   const ownerCount = await prisma.user.count({
     where: {
-      role: "OWNER",
+      OR: [
+        { role: "OWNER" },
+        { roleAssignments: { some: { role: "OWNER" } } },
+      ],
     },
   });
   const hasOwner = ownerCount > 0;

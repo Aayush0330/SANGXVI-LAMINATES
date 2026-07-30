@@ -9,6 +9,7 @@ import {
   isGoogleCalendarConfigured,
   syncTaskToGoogleCalendar,
 } from "@/lib/google-calendar";
+import { syncTaskCalendarById } from "@/lib/google-calendar-sync";
 import { createWorkflowNotification } from "@/lib/notifications";
 import { sendDueTaskReminders } from "@/lib/work-task-reminders";
 import { hasPermission } from "@/lib/permissions";
@@ -629,6 +630,10 @@ export async function createWorkTask(formData: FormData) {
     }),
   ]);
 
+  if (task.dueAt) {
+    await syncTaskCalendarById(task.id);
+  }
+
   revalidatePath("/internal/tasks");
   revalidatePath("/account/tasks");
   revalidatePath("/internal/dashboard");
@@ -751,6 +756,8 @@ export async function updateWorkTaskStatus(formData: FormData) {
     path: "/internal/tasks",
     description: `Changed ${existingTask.taskNumber} status to ${status}.`,
   });
+
+  await syncTaskCalendarById(taskId);
 
   revalidatePath("/internal/tasks");
   revalidatePath("/account/tasks");
@@ -1286,6 +1293,8 @@ export async function updateWorkTaskAssignment(formData: FormData) {
     path: "/internal/tasks",
     description: `Updated task ${task.taskNumber}.`,
   });
+
+  await syncTaskCalendarById(task.id);
 
   revalidatePath("/internal/tasks");
   revalidatePath("/account/tasks");

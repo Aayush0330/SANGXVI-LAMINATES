@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { formatDealerAccountCurrency, type InternalDealerOrderSource } from "@/lib/dealer-directory-shared";
 import { createInternalDealerOrderAction } from "./actions";
+import { orderPaymentTagOptions } from "@/lib/order-payment";
 
 type ProductItem = {
   id: string;
@@ -80,7 +81,19 @@ export function InternalDealerOrderBuilder({
           {!rows.length ? <p className="rounded-2xl bg-slate-50 p-5 text-center text-sm font-semibold text-slate-500 dark:bg-slate-950 dark:text-slate-400">Add at least one product.</p> : null}
         </div>
         <div className="mt-5 grid gap-4">
-          <div><label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Order Source</label><select name="source" defaultValue="MANUAL_ENTRY" className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold dark:border-slate-700 dark:bg-slate-950 dark:text-white">{sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><p className="mt-2 text-xs text-slate-400">WhatsApp is recorded only as a source label. No messaging integration is used.</p></div>
+          <div><label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Order Source</label><select name="source" defaultValue="MANUAL_ENTRY" className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold dark:border-slate-700 dark:bg-slate-950 dark:text-white">{sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><p className="mt-2 text-xs text-slate-400">This records how the order arrived.</p></div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Payment Type</label>
+              <select name="paymentTag" defaultValue="NORMAL_PAYMENT" className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold dark:border-slate-700 dark:bg-slate-950 dark:text-white">
+                {orderPaymentTagOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Payment Timeline</label>
+              <input name="paymentTimelineAt" type="date" className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold dark:border-slate-700 dark:bg-slate-950 dark:text-white" />
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2"><div><label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Priority</label><select name="priority" defaultValue="NORMAL" className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold dark:border-slate-700 dark:bg-slate-950 dark:text-white"><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div><div><label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Required By</label><input name="requiredBy" type="date" className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></div></div>
           <div><label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Order Notes</label><textarea name="notes" rows={4} maxLength={1000} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="Customer instruction, phone confirmation, walk-in reference..." /></div>
         </div>

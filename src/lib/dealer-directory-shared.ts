@@ -4,7 +4,7 @@ export const dealerOrderSourceOptions = [
   { value: "MANUAL_ENTRY", label: "Internal Manual" },
   { value: "PHONE", label: "Phone" },
   { value: "WALK_IN", label: "Walk-in" },
-  { value: "WHATSAPP", label: "WhatsApp (source only)" },
+  { value: "WHATSAPP", label: "WhatsApp" },
   { value: "SALES_FIELD", label: "Sales / Field" },
 ] as const;
 
@@ -16,7 +16,7 @@ const sourceLabels: Record<string, string> = {
   MANUAL_ENTRY: "Internal Manual",
   PHONE: "Phone",
   WALK_IN: "Walk-in",
-  WHATSAPP: "WhatsApp (recorded source)",
+  WHATSAPP: "WhatsApp",
   SALES_FIELD: "Sales / Field",
 };
 

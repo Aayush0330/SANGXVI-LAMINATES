@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createPortal } from "react-dom";
+import { normalizeInternalHref } from "@/lib/safe-internal-href";
 
 type LiveNotification = {
   id: string;
@@ -20,8 +20,8 @@ type LiveNotificationResponse = {
   notifications: LiveNotification[];
 };
 
-const VISIBLE_POLL_INTERVAL_MS = 5_000;
-const BACKGROUND_POLL_INTERVAL_MS = 15_000;
+const VISIBLE_POLL_INTERVAL_MS = 15_000;
+const BACKGROUND_POLL_INTERVAL_MS = 60_000;
 const TOAST_DURATION_MS = 8_000;
 const BASE_DOCUMENT_TITLE = "Sanghvi ERP";
 
@@ -35,6 +35,7 @@ async function showSystemNotification(notification: LiveNotification) {
     return;
   }
 
+  const href = normalizeInternalHref(notification.href) ?? "/";
   const registration = await navigator.serviceWorker.ready;
   await registration.showNotification(notification.title, {
     body: notification.message,
@@ -43,7 +44,7 @@ async function showSystemNotification(notification: LiveNotification) {
     tag: notification.id,
     silent: false,
     data: {
-      href: notification.href ?? "/",
+      href,
     },
   });
 }
@@ -60,16 +61,6 @@ export function LiveNotificationSync({
   const unreadCount = useRef(initialUnreadCount);
   const [liveUnreadCount, setLiveUnreadCount] = useState(initialUnreadCount);
   const [toasts, setToasts] = useState<LiveNotification[]>([]);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    unreadCount.current = initialUnreadCount;
-    setLiveUnreadCount(initialUnreadCount);
-  }, [initialUnreadCount]);
 
   useEffect(() => {
     const countLabel =
@@ -283,16 +274,17 @@ export function LiveNotificationSync({
   function openNotification(notification: LiveNotification) {
     dismissToast(notification.id);
 
-    if (notification.href) {
-      router.push(notification.href);
+    const href = normalizeInternalHref(notification.href);
+    if (href) {
+      router.push(href);
     }
   }
 
-  if (!mounted || toasts.length === 0) {
+  if (toasts.length === 0) {
     return null;
   }
 
-  return createPortal(
+  return (
     <div
       className="fixed right-4 top-20 z-[10000] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3 sm:right-6 sm:top-24"
       aria-live="assertive"
@@ -354,7 +346,6 @@ export function LiveNotificationSync({
           </div>
         </div>
       ))}
-    </div>,
-    document.body,
+    </div>
   );
 }

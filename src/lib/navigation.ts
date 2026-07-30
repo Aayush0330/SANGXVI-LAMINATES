@@ -231,7 +231,7 @@ export const fieldNavigation: NavigationItem[] = [
     permission: "manage_inventory_inquiries",
   },
   {
-    label: "Attendance",
+    label: "My Attendance",
     href: "/account/attendance",
     permission: "use_office_attendance",
   },

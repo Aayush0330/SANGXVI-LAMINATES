@@ -6,8 +6,8 @@
   --background: #f8fafc;
   --foreground: #0f172a;
   --font-geist-sans:
-    Inter, "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial,
-    sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Inter,
+    "Helvetica Neue", Arial, sans-serif;
   --font-geist-mono:
     "SFMono-Regular", "SF Mono", Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
@@ -41,6 +41,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+h1,
+h2,
+h3 {
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+/* The original UI used 900 weight almost everywhere. A slightly softer
+   display weight keeps headings clear without making every label look heavy. */
+.font-black {
+  font-weight: 800;
+}
+
 ::selection {
   background: #dbeafe;
   color: #0f172a;
@@ -51,7 +64,7 @@ a,
 input,
 select,
 textarea {
-  font: inherit;
+  font-family: inherit;
 }
 
 input,
@@ -63,6 +76,10 @@ textarea {
 button,
 a {
   -webkit-tap-highlight-color: transparent;
+}
+
+.inline-flex {
+  white-space: nowrap;
 }
 
 /* Keep the ERP clean and calm even when older dark utility classes remain. */
@@ -455,11 +472,50 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
   .notification-bell-button:hover .notification-bell-icon,
   .notification-bell-unread .notification-bell-icon,
   .notification-bell-unread::before,
   .notification-bell-unread::after,
   .notification-count-badge {
     animation: none !important;
+  }
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .payslip-print-surface {
+    background: #ffffff !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: #0f172a !important;
+  }
+
+  .payslip-print-surface * {
+    border-color: #e2e8f0 !important;
+    color: #0f172a !important;
+  }
+
+  .payslip-print-surface .payslip-print-inverse,
+  .payslip-print-surface .payslip-print-inverse * {
+    background: #0f172a !important;
+    border-color: #0f172a !important;
+    color: #ffffff !important;
   }
 }

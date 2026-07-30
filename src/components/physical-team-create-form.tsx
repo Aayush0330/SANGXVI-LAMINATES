@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useFormStatus } from "react-dom";
 import { createPhysicalTeamAction } from "@/app/internal/teams/actions";
 
 type PhysicalWorkerOption = {
   id: string;
   name: string;
+  geofenceMode: string;
+  attendanceStatus: string;
   assignedTeamId: string | null;
   assignedTeamName: string | null;
 };
@@ -44,9 +47,27 @@ function PlusIcon() {
 }
 
 function optionLabel(worker: PhysicalWorkerOption) {
+  const attendanceMode =
+    worker.geofenceMode === "ANYWHERE" ? "Field flexible" : "Office GPS";
+  const workerLabel = `${worker.name} · ${attendanceMode} · ${worker.attendanceStatus}`;
+
   return worker.assignedTeamName
-    ? `${worker.name} — Assigned to ${worker.assignedTeamName}`
-    : worker.name;
+    ? `${workerLabel} — Assigned to ${worker.assignedTeamName}`
+    : workerLabel;
+}
+
+function CreateTeamButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      disabled={pending}
+      className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-wait disabled:translate-y-0 disabled:opacity-60 xl:w-auto"
+    >
+      <PlusIcon />
+      {pending ? "Creating Team..." : "Create Team"}
+    </button>
+  );
 }
 
 export function PhysicalTeamCreateForm({
@@ -65,7 +86,10 @@ export function PhysicalTeamCreateForm({
   }
 
   return (
-    <form action={createPhysicalTeamAction} className="mt-6 grid min-w-0 gap-4 md:grid-cols-2">
+    <form
+      action={createPhysicalTeamAction}
+      className="mt-6 grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4"
+    >
       <div className="min-w-0">
         <label className={labelClass}>Team Name</label>
         <input
@@ -98,7 +122,7 @@ export function PhysicalTeamCreateForm({
         </select>
       </div>
 
-      <div className="min-w-0 md:col-span-2">
+      <div className="min-w-0 md:col-span-2 xl:col-span-2">
         <label className={labelClass}>Work Area / Instructions</label>
         <textarea
           name="description"
@@ -138,11 +162,8 @@ export function PhysicalTeamCreateForm({
         </select>
       </div>
 
-      <div className="flex items-end md:justify-end">
-        <button className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700 md:w-auto">
-          <PlusIcon />
-          Create Team
-        </button>
+      <div className="flex items-end xl:justify-end">
+        <CreateTeamButton />
       </div>
     </form>
   );

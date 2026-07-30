@@ -22,8 +22,14 @@ import {
 import { createSecurityAuditLog } from "@/lib/security-audit";
 import { setAutomatedTaskStatus, workflowTaskKeys } from "@/lib/workflow-tasks";
 
-function pageUrl(type: "error" | "success", value: string) {
-  return `/internal/delivery-proofs?${type}=${encodeURIComponent(value)}`;
+function pageUrl(
+  type: "error" | "success",
+  value: string,
+  orderId?: string,
+) {
+  const params = new URLSearchParams({ [type]: value });
+  if (orderId) params.set("order", orderId);
+  return `/internal/delivery-proofs?${params.toString()}#proof-detail`;
 }
 
 type LockedProofOrder = {
@@ -105,9 +111,9 @@ function assertProofStatusAllowed(status: string) {
   }
 }
 
-function redirectManagementError(error: unknown): never {
+function redirectManagementError(error: unknown, orderId: string): never {
   if (error instanceof DeliveryProofManagementError) {
-    redirect(pageUrl("error", error.code));
+    redirect(pageUrl("error", error.code, orderId));
   }
 
   throw error;
@@ -136,7 +142,7 @@ export async function uploadManagerAssistedDeliveryProofAction(
   const validatedProof = await readAndValidateDeliveryProof(file, note);
 
   if ("error" in validatedProof && validatedProof.error) {
-    redirect(pageUrl("error", validatedProof.error));
+    redirect(pageUrl("error", validatedProof.error, orderId));
   }
 
   let orderNumber = orderId;
@@ -306,7 +312,7 @@ export async function uploadManagerAssistedDeliveryProofAction(
       });
     });
   } catch (error) {
-    redirectManagementError(error);
+    redirectManagementError(error, orderId);
   }
 
   await createSecurityAuditLog({
@@ -326,7 +332,7 @@ export async function uploadManagerAssistedDeliveryProofAction(
   revalidatePath("/internal/tasks");
   revalidatePath("/internal/security");
 
-  redirect(pageUrl("success", "manager-proof-uploaded"));
+  redirect(pageUrl("success", "manager-proof-uploaded", orderId));
 }
 
 export async function replaceDeliveryProofAction(formData: FormData) {
@@ -353,17 +359,17 @@ export async function replaceDeliveryProofAction(formData: FormData) {
   if (
     replacementReason.length < DELIVERY_PROOF_MIN_REPLACEMENT_REASON_LENGTH
   ) {
-    redirect(pageUrl("error", "replacement-reason-required"));
+    redirect(pageUrl("error", "replacement-reason-required", orderId));
   }
 
   if (replacementReason.length > 500) {
-    redirect(pageUrl("error", "replacement-reason-too-long"));
+    redirect(pageUrl("error", "replacement-reason-too-long", orderId));
   }
 
   const validatedProof = await readAndValidateDeliveryProof(file, note);
 
   if ("error" in validatedProof && validatedProof.error) {
-    redirect(pageUrl("error", validatedProof.error));
+    redirect(pageUrl("error", validatedProof.error, orderId));
   }
 
   let orderNumber = orderId;
@@ -510,7 +516,7 @@ export async function replaceDeliveryProofAction(formData: FormData) {
       });
     });
   } catch (error) {
-    redirectManagementError(error);
+    redirectManagementError(error, orderId);
   }
 
   await createSecurityAuditLog({
@@ -530,5 +536,5 @@ export async function replaceDeliveryProofAction(formData: FormData) {
   revalidatePath("/internal/tasks");
   revalidatePath("/internal/security");
 
-  redirect(pageUrl("success", "proof-replaced"));
+  redirect(pageUrl("success", "proof-replaced", orderId));
 }

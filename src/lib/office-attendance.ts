@@ -351,7 +351,20 @@ export async function getEmployeeAttendanceRows(workDate: string) {
       u."id" AS "userId",
       u."name" AS "userName",
       u."email" AS "userEmail",
-      u."role"::text AS "userRole",
+      COALESCE(
+        CASE
+          WHEN u."role"::text <> 'DEALER' THEN u."role"::text
+          ELSE NULL
+        END,
+        (
+          SELECT assignment."role"::text
+          FROM public."UserRoleAssignment" AS assignment
+          WHERE assignment."userId" = u."id"
+            AND assignment."role"::text <> 'DEALER'
+          ORDER BY assignment."isPrimary" DESC, assignment."createdAt" ASC
+          LIMIT 1
+        )
+      ) AS "userRole",
       u."phone" AS "userPhone",
       a."id" AS "attendanceId",
       a."id" AS "id",
@@ -402,8 +415,16 @@ export async function getEmployeeAttendanceRows(workDate: string) {
     FROM public."User" u
     LEFT JOIN public."OfficeAttendance" a
       ON a."userId" = u."id" AND a."workDate" = ${workDate}
-    WHERE u."role"::text <> 'DEALER'
-      AND u."status"::text = 'ACTIVE'
+    WHERE u."status"::text = 'ACTIVE'
+      AND (
+        u."role"::text <> 'DEALER'
+        OR EXISTS (
+          SELECT 1
+          FROM public."UserRoleAssignment" AS assignment
+          WHERE assignment."userId" = u."id"
+            AND assignment."role"::text <> 'DEALER'
+        )
+      )
     ORDER BY u."name" ASC
   `;
 }

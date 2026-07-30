@@ -82,8 +82,10 @@ function getEditableStatus(value: string): CollectionStatus {
   return CollectionStatus.ASSIGNED;
 }
 
-function canManageInternalCollections(role: string) {
-  return role === "owner" || role === "manager" || role === "accountant";
+function canManageInternalCollections(roles: readonly string[]) {
+  return roles.some(
+    (role) => role === "owner" || role === "manager" || role === "accountant",
+  );
 }
 
 function hasExpectedSignature(bytes: Uint8Array, mimeType: string) {
@@ -112,7 +114,10 @@ async function requireInternalCollectionAccess() {
     "/internal/collections"
   );
 
-  if (!result.hasAccess || !canManageInternalCollections(result.currentUser.role)) {
+  if (
+    !result.hasAccess ||
+    !canManageInternalCollections(result.currentUser.roles)
+  ) {
     redirect("/internal/collections?error=permission-denied");
   }
 
@@ -122,13 +127,22 @@ async function requireInternalCollectionAccess() {
 async function getActiveAssignee(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, name: true, status: true, role: true },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      role: true,
+      roleAssignments: { select: { role: true } },
+    },
   });
 
+  const roles = user
+    ? new Set([user.role, ...user.roleAssignments.map((item) => item.role)])
+    : new Set<string>();
   if (
     !user ||
     user.status !== "ACTIVE" ||
-    !collectionAssignableRoles.has(user.role)
+    !Array.from(roles).some((role) => collectionAssignableRoles.has(role))
   ) {
     redirect("/internal/collections?error=agent-not-found");
   }
@@ -265,44 +279,68 @@ export async function updateCollectionAssignmentAction(formData: FormData) {
     redirect("/internal/collections?error=invalid-collected-amount");
   }
 
-  const now = new Date();
-  const normalizedStatus =
-    status === CollectionStatus.COLLECTED ||
-    status === CollectionStatus.PARTIALLY_COLLECTED
-      ? amountCollected >= existing.amountToCollect
-        ? CollectionStatus.COLLECTED
-        : CollectionStatus.PARTIALLY_COLLECTED
-      : status;
-  const collection = await prisma.collectionAssignment.update({
-    where: { id: existing.id },
-    data: {
-      assignedToId: assignee?.id ?? null,
-      amountCollected,
-      status: normalizedStatus,
-      paymentMode: getPaymentMode(getString(formData, "paymentMode", 50)),
-      dueAt: getOptionalDate(formData, "dueAt"),
-      notes: getOptionalString(formData, "notes", 10_000),
-      nextFollowUpAt: getOptionalDate(formData, "nextFollowUpAt"),
-      failureReason: getOptionalString(formData, "failureReason", 2_000),
-      onTheWayAt:
-        normalizedStatus === CollectionStatus.ON_THE_WAY
-          ? existing.onTheWayAt ?? now
-          : existing.onTheWayAt,
-      reachedAt:
-        normalizedStatus === CollectionStatus.REACHED
-          ? existing.reachedAt ?? now
-          : existing.reachedAt,
-      failedAt:
-        normalizedStatus === CollectionStatus.FAILED ? now : existing.failedAt,
-      rescheduledAt:
-        normalizedStatus === CollectionStatus.RESCHEDULED
-          ? now
-          : existing.rescheduledAt,
-      collectedAt:
-        normalizedStatus === CollectionStatus.COLLECTED
-          ? existing.collectedAt ?? now
-          : existing.collectedAt,
-    },
+  const collection = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM public."CollectionAssignment"
+      WHERE "id" = ${existing.id}
+      FOR UPDATE
+    `;
+    const locked = await tx.collectionAssignment.findUnique({
+      where: { id: existing.id },
+    });
+    if (!locked) {
+      redirect("/internal/collections?error=collection-not-found");
+    }
+    if (locked.status === CollectionStatus.VERIFIED) {
+      redirect("/internal/collections?error=collection-locked");
+    }
+    if (amountCollected < 0 || amountCollected > locked.amountToCollect) {
+      redirect("/internal/collections?error=invalid-collected-amount");
+    }
+
+    const now = new Date();
+    const normalizedStatus =
+      status === CollectionStatus.COLLECTED ||
+      status === CollectionStatus.PARTIALLY_COLLECTED
+        ? amountCollected >= locked.amountToCollect
+          ? CollectionStatus.COLLECTED
+          : CollectionStatus.PARTIALLY_COLLECTED
+        : status;
+
+    return tx.collectionAssignment.update({
+      where: { id: locked.id },
+      data: {
+        assignedToId: assignee?.id ?? null,
+        amountCollected,
+        status: normalizedStatus,
+        paymentMode: getPaymentMode(getString(formData, "paymentMode", 50)),
+        dueAt: getOptionalDate(formData, "dueAt"),
+        notes: getOptionalString(formData, "notes", 10_000),
+        nextFollowUpAt: getOptionalDate(formData, "nextFollowUpAt"),
+        failureReason: getOptionalString(formData, "failureReason", 2_000),
+        onTheWayAt:
+          normalizedStatus === CollectionStatus.ON_THE_WAY
+            ? locked.onTheWayAt ?? now
+            : locked.onTheWayAt,
+        reachedAt:
+          normalizedStatus === CollectionStatus.REACHED
+            ? locked.reachedAt ?? now
+            : locked.reachedAt,
+        failedAt:
+          normalizedStatus === CollectionStatus.FAILED
+            ? now
+            : locked.failedAt,
+        rescheduledAt:
+          normalizedStatus === CollectionStatus.RESCHEDULED
+            ? now
+            : locked.rescheduledAt,
+        collectedAt:
+          normalizedStatus === CollectionStatus.COLLECTED
+            ? locked.collectedAt ?? now
+            : locked.collectedAt,
+      },
+    });
   });
 
   await createSecurityAuditLog({
@@ -336,6 +374,12 @@ export async function uploadInternalCollectionProofAction(formData: FormData) {
   );
 
   const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM public."CollectionAssignment"
+      WHERE "id" = ${collectionId}
+      FOR UPDATE
+    `;
     const collection = await tx.collectionAssignment.findUnique({
       where: { id: collectionId },
     });
@@ -392,28 +436,38 @@ export async function uploadInternalCollectionProofAction(formData: FormData) {
 export async function verifyCollectionAction(formData: FormData) {
   const currentUser = await requireInternalCollectionAccess();
   const collectionId = getString(formData, "collectionId", 100);
-  const collection = await prisma.collectionAssignment.findUnique({
-    where: { id: collectionId },
-    include: { proofs: { select: { id: true } } },
-  });
+  const collection = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM public."CollectionAssignment"
+      WHERE "id" = ${collectionId}
+      FOR UPDATE
+    `;
+    const locked = await tx.collectionAssignment.findUnique({
+      where: { id: collectionId },
+      include: { proofs: { select: { id: true } } },
+    });
+    if (!locked) {
+      redirect("/internal/collections?error=collection-not-found");
+    }
+    if (locked.status === CollectionStatus.VERIFIED) {
+      redirect("/internal/collections?error=collection-locked");
+    }
+    if (locked.proofs.length === 0) {
+      redirect("/internal/collections?error=proof-required");
+    }
+    if (locked.amountCollected < locked.amountToCollect) {
+      redirect("/internal/collections?error=collection-incomplete");
+    }
 
-  if (!collection) {
-    redirect("/internal/collections?error=collection-not-found");
-  }
-  if (collection.proofs.length === 0) {
-    redirect("/internal/collections?error=proof-required");
-  }
-  if (collection.amountCollected < collection.amountToCollect) {
-    redirect("/internal/collections?error=collection-incomplete");
-  }
-
-  await prisma.collectionAssignment.update({
-    where: { id: collection.id },
-    data: {
-      status: CollectionStatus.VERIFIED,
-      verifiedAt: new Date(),
-      verifiedById: currentUser.id,
-    },
+    return tx.collectionAssignment.update({
+      where: { id: locked.id },
+      data: {
+        status: CollectionStatus.VERIFIED,
+        verifiedAt: new Date(),
+        verifiedById: currentUser.id,
+      },
+    });
   });
 
   await createSecurityAuditLog({

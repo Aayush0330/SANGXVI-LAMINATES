@@ -78,21 +78,21 @@ export default async function DealerDetailPage({
       <TeamFeedbackToast message={feedback(query?.error, query?.success)} />
 
       <section className="overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="bg-gradient-to-br from-slate-950 via-blue-950 to-indigo-900 p-6 text-white sm:p-8">
+        <div className="bg-gradient-to-br from-white via-blue-50 to-indigo-50 p-6 text-slate-950 dark:from-slate-950 dark:via-blue-950 dark:to-indigo-900 dark:text-white sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] ${dealer.status === "ACTIVE" ? "bg-emerald-400/15 text-emerald-200" : "bg-white/10 text-slate-300"}`}>{dealer.status === "ACTIVE" ? "Active Dealer" : "Archived Dealer"}</span>
-                {overLimit ? <span className="rounded-full bg-rose-400/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-rose-200">Credit limit exceeded</span> : null}
+                <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] ${dealer.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200" : "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300"}`}>{dealer.status === "ACTIVE" ? "Active Dealer" : "Archived Dealer"}</span>
+                {overLimit ? <span className="rounded-full bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-rose-700 dark:bg-rose-400/15 dark:text-rose-200">Credit limit exceeded</span> : null}
               </div>
-              <p className="mt-5 text-xs font-black uppercase tracking-[0.3em] text-blue-200">Dealer Details</p>
+              <p className="mt-5 text-xs font-black uppercase tracking-[0.3em] text-blue-600 dark:text-blue-200">Dealer Details</p>
               <h1 className="mt-2 text-4xl font-black md:text-5xl">{profile?.businessName ?? dealer.name}</h1>
-              <p className="mt-3 text-sm font-semibold text-blue-100">{dealer.name} · {dealer.email} {dealer.phone ? `· ${dealer.phone}` : ""}</p>
-              <p className="mt-2 text-xs text-blue-200/80">{[profile?.city, profile?.state, profile?.gstNumber ? `GST ${profile.gstNumber}` : null].filter(Boolean).join(" · ") || "Business profile details pending"}</p>
+              <p className="mt-3 text-sm font-semibold text-slate-600 dark:text-blue-100">{dealer.name} · {dealer.email} {dealer.phone ? `· ${dealer.phone}` : ""}</p>
+              <p className="mt-2 text-xs text-slate-500 dark:text-blue-200/80">{[profile?.city, profile?.state, profile?.gstNumber ? `GST ${profile.gstNumber}` : null].filter(Boolean).join(" · ") || "Business profile details pending"}</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              {canCreateOrder ? <Link href={`/internal/dealers/${dealer.id}/new-order`} className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-blue-50">Create Internal Order</Link> : null}
-              <Link href="/internal/dealers" className="rounded-2xl border border-white/20 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">Back to Directory</Link>
+              {canCreateOrder ? <Link href={`/internal/dealers/${dealer.id}/new-order`} className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-700 dark:bg-white dark:text-slate-950 dark:hover:bg-blue-50">Create Internal Order</Link> : null}
+              <Link href="/internal/dealers" className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-white/20 dark:bg-transparent dark:text-white dark:hover:bg-white/10">Back to Directory</Link>
             </div>
           </div>
         </div>

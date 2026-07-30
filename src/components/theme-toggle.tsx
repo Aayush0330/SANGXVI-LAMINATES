@@ -2,17 +2,20 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
-const STORAGE_KEY = "sangxvi-theme";
+const STORAGE_KEY = "sanghvi-theme";
+const LEGACY_STORAGE_KEY = "sangxvi-theme";
 
 type ThemeMode = "light" | "dark";
-const THEME_CHANGE_EVENT = "sangxvi-theme-change";
+const THEME_CHANGE_EVENT = "sanghvi-theme-change";
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") {
     return "light";
   }
 
-  const savedTheme = window.localStorage.getItem(STORAGE_KEY);
+  const savedTheme =
+    window.localStorage.getItem(STORAGE_KEY) ??
+    window.localStorage.getItem(LEGACY_STORAGE_KEY);
 
   if (savedTheme === "dark" || savedTheme === "light") {
     return savedTheme;
@@ -60,6 +63,7 @@ export function ThemeToggle() {
   function handleToggle() {
     const nextTheme = theme === "dark" ? "light" : "dark";
     window.localStorage.setItem(STORAGE_KEY, nextTheme);
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
     applyTheme(nextTheme);
     window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
   }

@@ -14,6 +14,8 @@ import {
   type TeamFeedbackMessage,
 } from "@/components/team-feedback-toast";
 import { PhysicalTeamCreateForm } from "@/components/physical-team-create-form";
+import { WorkforceSetupNavigation } from "@/components/workforce-setup-navigation";
+import { getIndiaWorkDate } from "@/lib/office-attendance";
 import {
   addPhysicalTeamMemberAction,
   removePhysicalTeamMemberAction,
@@ -145,6 +147,24 @@ function PackageIcon({ className }: { className?: string }) {
     <Icon className={className}>
       <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
       <path d="m4.4 7.7 7.6 4.2 7.6-4.2M12 12v9" />
+    </Icon>
+  );
+}
+
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </Icon>
+  );
+}
+
+function LocationIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+      <circle cx="12" cy="10" r="2.5" />
     </Icon>
   );
 }
@@ -293,7 +313,64 @@ function assignmentBadge(status: PhysicalCheckStatus) {
   return "bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300";
 }
 
-async function getPhysicalWorkers() {
+type TodayAttendance = {
+  status: string;
+  punchInAt: Date | null;
+  punchOutAt: Date | null;
+  currentBreakType: string | null;
+};
+
+function attendanceState(attendance?: TodayAttendance) {
+  if (!attendance?.punchInAt) {
+    return {
+      label: "Not punched in",
+      shortLabel: "Not in",
+      className:
+        "bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-slate-300",
+    };
+  }
+
+  if (attendance.punchOutAt || attendance.status === "COMPLETED") {
+    return {
+      label: "Shift complete",
+      shortLabel: "Complete",
+      className:
+        "bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300",
+    };
+  }
+
+  if (attendance.currentBreakType) {
+    return {
+      label: "On break",
+      shortLabel: "On break",
+      className:
+        "bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300",
+    };
+  }
+
+  return {
+    label: "Present today",
+    shortLabel: "Present",
+    className:
+      "bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300",
+  };
+}
+
+function attendanceMode(mode: string) {
+  return mode === "ANYWHERE"
+    ? {
+        label: "Field flexible",
+        className:
+          "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-400/20 dark:bg-violet-400/10 dark:text-violet-300",
+      }
+    : {
+        label: "Office GPS",
+        className:
+          "border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/20 dark:bg-cyan-400/10 dark:text-cyan-300",
+      };
+}
+
+async function getPhysicalWorkers(workDate: string) {
   return prisma.user.findMany({
     where: {
       status: "ACTIVE",
@@ -312,6 +389,17 @@ async function getPhysicalWorkers() {
       name: true,
       email: true,
       phone: true,
+      geofenceMode: true,
+      officeAttendanceRecords: {
+        where: { workDate },
+        select: {
+          status: true,
+          punchInAt: true,
+          punchOutAt: true,
+          currentBreakType: true,
+        },
+        take: 1,
+      },
       workTeamMemberships: {
         where: {
           team: { teamType: WorkTeamType.PHYSICAL_DISPATCH },
@@ -326,7 +414,7 @@ async function getPhysicalWorkers() {
   });
 }
 
-async function getPhysicalTeams() {
+async function getPhysicalTeams(workDate: string) {
   return prisma.workTeam.findMany({
     where: {
       teamType: WorkTeamType.PHYSICAL_DISPATCH,
@@ -340,6 +428,17 @@ async function getPhysicalTeams() {
               name: true,
               email: true,
               phone: true,
+              geofenceMode: true,
+              officeAttendanceRecords: {
+                where: { workDate },
+                select: {
+                  status: true,
+                  punchInAt: true,
+                  punchOutAt: true,
+                  currentBreakType: true,
+                },
+                take: 1,
+              },
             },
           },
         },
@@ -427,7 +526,11 @@ export default async function PhysicalTeamsPage({
     redirect("/internal/dashboard");
   }
 
-  const [allTeams, workers] = await Promise.all([getPhysicalTeams(), getPhysicalWorkers()]);
+  const workDate = getIndiaWorkDate();
+  const [allTeams, workers] = await Promise.all([
+    getPhysicalTeams(workDate),
+    getPhysicalWorkers(workDate),
+  ]);
   const message = getMessage(params?.error, params?.success);
   const query = String(params?.q ?? "").trim().toLowerCase();
   const statusFilter = String(params?.status ?? "ALL").toUpperCase();
@@ -450,6 +553,22 @@ export default async function PhysicalTeamsPage({
       .filter((team) => team.isActive)
       .flatMap((team) => team.members.map((member) => member.userId)),
   );
+  const activeTeamMembers = allTeams
+    .filter((team) => team.isActive)
+    .flatMap((team) => team.members);
+  const presentTodayWorkerIds = new Set(
+    activeTeamMembers
+      .filter((member) => member.user.officeAttendanceRecords[0]?.punchInAt)
+      .map((member) => member.userId),
+  );
+  const fieldFlexibleWorkerIds = new Set(
+    activeTeamMembers
+      .filter((member) => member.user.geofenceMode === "ANYWHERE")
+      .map((member) => member.userId),
+  );
+  const unassignedWorkerCount = workers.filter(
+    (worker) => !worker.workTeamMemberships[0],
+  ).length;
   const assignments = allTeams.flatMap((team) =>
     team.physicalAssignments.map((assignment) => ({ ...assignment, team })),
   );
@@ -458,9 +577,6 @@ export default async function PhysicalTeamsPage({
       .filter((assignment) => activeAssignmentStatuses.has(assignment.status))
       .map((assignment) => assignment.orderId),
   ).size;
-  const readyForQc = assignments.filter(
-    (assignment) => assignment.status === PhysicalCheckStatus.READY_FOR_QC,
-  ).length;
   const blockerCount = assignments.filter((assignment) =>
     blockerAssignmentStatuses.has(assignment.status),
   ).length;
@@ -476,62 +592,87 @@ export default async function PhysicalTeamsPage({
     .slice(0, 5);
 
   return (
-    <div className="space-y-6 pb-10">
-      <section className="relative overflow-hidden rounded-[28px] border border-blue-100 bg-gradient-to-br from-white via-blue-50/70 to-violet-100/70 px-6 py-7 shadow-sm dark:border-slate-800 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/60 sm:px-8">
-        <div className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-blue-300/30 blur-3xl dark:bg-blue-500/10" />
-        <div className="pointer-events-none absolute right-20 top-8 h-36 w-36 rounded-full bg-violet-300/30 blur-2xl dark:bg-violet-500/10" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.34em] text-blue-600 dark:text-cyan-300">
-              Workforce Operations
-            </p>
-            <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
+    <div className="space-y-5 pb-10">
+      <section className="relative overflow-hidden rounded-[28px] border border-slate-200 bg-white px-6 py-7 text-slate-950 shadow-sm shadow-slate-200/70 sm:px-8 dark:border-white/10 dark:bg-slate-950 dark:text-white dark:shadow-none">
+        <div className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-blue-100/80 blur-3xl dark:bg-blue-500/20" />
+        <div className="pointer-events-none absolute right-20 top-8 h-36 w-36 rounded-full bg-violet-100/70 blur-2xl dark:bg-violet-500/15" />
+        <div className="relative flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.26em] text-blue-600 dark:text-blue-300">
+                Workforce operations
+              </p>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300">
+                Attendance connected
+              </span>
+            </div>
+            <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">
               Physical Teams
             </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-              Manage physical verification teams, assign workers, and track order readiness before QC.
+            <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600 dark:text-slate-300">
+              Manage ground teams, attendance readiness and physical order
+              progress from one connected workspace.
             </p>
           </div>
-          <a
-            href="#create-team"
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700"
-          >
-            <PlusIcon className="h-5 w-5" />
-            Create Physical Team
-          </a>
+
+          <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[410px]">
+            <Link
+              href="/internal/attendance"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-xs font-black text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-white/15 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]"
+            >
+              <ClockIcon className="h-4 w-4" />
+              Open Attendance
+            </Link>
+            <a
+              href="#create-team"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 text-xs font-black text-white transition hover:bg-blue-700"
+            >
+              <PlusIcon className="h-4 w-4" />
+              Create Team
+            </a>
+          </div>
         </div>
       </section>
 
+      <WorkforceSetupNavigation active="teams" />
+
       <TeamFeedbackToast message={message} />
 
-      <section className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           icon={<UsersIcon className="h-6 w-6" />}
           iconClass="bg-blue-50 text-blue-600 dark:bg-blue-400/10 dark:text-blue-300"
-          label="Total Physical Teams"
-          value={allTeams.length}
-          helper="Across all work areas"
+          label="Active Teams"
+          value={allTeams.filter((team) => team.isActive).length}
+          helper={`${allTeams.length} total teams`}
         />
         <MetricCard
-          icon={<UsersIcon className="h-6 w-6" />}
+          icon={<ClockIcon className="h-6 w-6" />}
           iconClass="bg-emerald-50 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300"
-          label="Active Workers"
-          value={uniqueActiveWorkerIds.size}
-          helper="Currently assigned to active teams"
+          label="Present Today"
+          value={presentTodayWorkerIds.size}
+          helper={`Of ${uniqueActiveWorkerIds.size} assigned workers`}
+        />
+        <MetricCard
+          icon={<LocationIcon className="h-6 w-6" />}
+          iconClass="bg-violet-50 text-violet-600 dark:bg-violet-400/10 dark:text-violet-300"
+          label="Field Flexible"
+          value={fieldFlexibleWorkerIds.size}
+          helper="Office radius exempt"
+        />
+        <MetricCard
+          icon={<AlertIcon className="h-6 w-6" />}
+          iconClass="bg-amber-50 text-amber-600 dark:bg-amber-400/10 dark:text-amber-300"
+          label="Unassigned"
+          value={unassignedWorkerCount}
+          helper="Available physical workers"
         />
         <MetricCard
           icon={<ClipboardIcon className="h-6 w-6" />}
-          iconClass="bg-violet-50 text-violet-600 dark:bg-violet-400/10 dark:text-violet-300"
+          iconClass="bg-cyan-50 text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-300"
           label="Orders In Progress"
           value={ordersInProgress}
           helper="Across all physical teams"
-        />
-        <MetricCard
-          icon={<CheckIcon className="h-6 w-6" />}
-          iconClass="bg-orange-50 text-orange-600 dark:bg-orange-400/10 dark:text-orange-300"
-          label="Ready for QC"
-          value={readyForQc}
-          helper="Awaiting quality verification"
         />
       </section>
 
@@ -546,7 +687,8 @@ export default async function PhysicalTeamsPage({
           <div>
             <h2 className="text-xl font-black text-slate-950 dark:text-white">Create Physical Team</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Add a team lead and an initial worker now; more workers can be added later.
+              Assign a lead and initial worker. Their attendance mode stays
+              linked to the employee profile.
             </p>
           </div>
         </div>
@@ -557,6 +699,10 @@ export default async function PhysicalTeamsPage({
             return {
               id: worker.id,
               name: worker.name,
+              geofenceMode: worker.geofenceMode,
+              attendanceStatus: attendanceState(
+                worker.officeAttendanceRecords[0],
+              ).shortLabel,
               assignedTeamId: membership?.teamId ?? null,
               assignedTeamName: membership?.team.name ?? null,
             };
@@ -631,6 +777,14 @@ export default async function PhysicalTeamsPage({
                 const readyCount = team.physicalAssignments.filter(
                   (assignment) => assignment.status === PhysicalCheckStatus.READY_FOR_QC,
                 ).length;
+                const presentCount = team.members.filter(
+                  (member) => member.user.officeAttendanceRecords[0]?.punchInAt,
+                ).length;
+                const fieldFlexibleCount = team.members.filter(
+                  (member) => member.user.geofenceMode === "ANYWHERE",
+                ).length;
+                const officeGpsCount =
+                  team.members.length - fieldFlexibleCount;
 
                 return (
                   <article
@@ -688,9 +842,15 @@ export default async function PhysicalTeamsPage({
                       <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
                         {[
                           ["Team Size", team.members.length, "text-slate-950 dark:text-white"],
-                          ["In Progress", inProgressCount, "text-blue-600 dark:text-blue-300"],
-                          ["Problems", problemsCount, problemsCount ? "text-amber-600" : "text-emerald-600"],
-                          ["Ready for QC", readyCount, "text-emerald-600"],
+                          ["Present Today", presentCount, "text-blue-600 dark:text-blue-300"],
+                          ["Active Orders", inProgressCount, "text-violet-600 dark:text-violet-300"],
+                          [
+                            "QC / Issues",
+                            `${readyCount} / ${problemsCount}`,
+                            problemsCount
+                              ? "text-amber-600"
+                              : "text-emerald-600",
+                          ],
                         ].map(([label, value, color]) => (
                           <div key={String(label)} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-slate-800 dark:bg-slate-900">
                             <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">{label}</p>
@@ -711,6 +871,17 @@ export default async function PhysicalTeamsPage({
                                 <div className="min-w-0">
                                   <p className="truncate text-sm font-black text-slate-950 dark:text-white">{lead.user.name}</p>
                                   <p className="truncate text-[11px] text-slate-500">{lead.user.phone || lead.user.email}</p>
+                                  <span
+                                    className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[9px] font-black ${attendanceState(
+                                      lead.user.officeAttendanceRecords[0],
+                                    ).className}`}
+                                  >
+                                    {
+                                      attendanceState(
+                                        lead.user.officeAttendanceRecords[0],
+                                      ).shortLabel
+                                    }
+                                  </span>
                                 </div>
                               </div>
                             ) : (
@@ -726,7 +897,11 @@ export default async function PhysicalTeamsPage({
                                 workersOnly.slice(0, 7).map((member, memberIndex) => (
                                   <div
                                     key={member.id}
-                                    title={member.user.name}
+                                    title={`${member.user.name} · ${
+                                      attendanceState(
+                                        member.user.officeAttendanceRecords[0],
+                                      ).label
+                                    } · ${attendanceMode(member.user.geofenceMode).label}`}
                                     className={`grid h-9 w-9 place-items-center rounded-full border-2 border-white text-[11px] font-black text-white shadow-sm dark:border-slate-900 ${
                                       [
                                         "bg-blue-500",
@@ -751,6 +926,21 @@ export default async function PhysicalTeamsPage({
                             </div>
                           </div>
                         </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-[10px] font-black text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">
+                          <ClockIcon className="h-3.5 w-3.5" />
+                          {presentCount}/{team.members.length} punched in today
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-cyan-50 px-3 py-1.5 text-[10px] font-black text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-300">
+                          <LocationIcon className="h-3.5 w-3.5" />
+                          {officeGpsCount} office GPS
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-[10px] font-black text-violet-700 dark:bg-violet-400/10 dark:text-violet-300">
+                          <LocationIcon className="h-3.5 w-3.5" />
+                          {fieldFlexibleCount} field flexible
+                        </span>
                       </div>
 
                       <div className="mt-4">
@@ -829,6 +1019,36 @@ export default async function PhysicalTeamsPage({
                                       <p className="truncate text-[11px] text-slate-500">
                                         {member.role === WorkTeamMemberRole.LEAD ? "Team Lead" : "Worker"} · {member.user.email}
                                       </p>
+                                      <div className="mt-2 flex flex-wrap gap-1.5">
+                                        <span
+                                          className={`rounded-full px-2 py-0.5 text-[9px] font-black ${
+                                            attendanceState(
+                                              member.user
+                                                .officeAttendanceRecords[0],
+                                            ).className
+                                          }`}
+                                        >
+                                          {
+                                            attendanceState(
+                                              member.user
+                                                .officeAttendanceRecords[0],
+                                            ).label
+                                          }
+                                        </span>
+                                        <span
+                                          className={`rounded-full border px-2 py-0.5 text-[9px] font-black ${
+                                            attendanceMode(
+                                              member.user.geofenceMode,
+                                            ).className
+                                          }`}
+                                        >
+                                          {
+                                            attendanceMode(
+                                              member.user.geofenceMode,
+                                            ).label
+                                          }
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
                                   <form action={removePhysicalTeamMemberAction}>
@@ -866,7 +1086,11 @@ export default async function PhysicalTeamsPage({
                                       ? ` — Assigned to ${membership.team.name}`
                                       : assignedHere
                                         ? " — Current team"
-                                        : ""}
+                                        : ` — ${
+                                            worker.geofenceMode === "ANYWHERE"
+                                              ? "Field flexible"
+                                              : "Office GPS"
+                                          }`}
                                   </option>
                                 );
                               })}
@@ -879,6 +1103,12 @@ export default async function PhysicalTeamsPage({
                               Assign
                             </button>
                           </form>
+                          <Link
+                            href="/internal/users"
+                            className="mt-3 inline-flex text-xs font-black text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                          >
+                            Manage worker roles and attendance modes →
+                          </Link>
                         </div>
                       </div>
                     </details>
@@ -893,6 +1123,24 @@ export default async function PhysicalTeamsPage({
           <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none">
             <h2 className="text-base font-black text-slate-950 dark:text-white">Team Insights</h2>
             <div className="mt-4 space-y-3">
+              <Link href="/internal/attendance" className="flex items-center gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-800 dark:hover:bg-blue-400/5">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-400/10 dark:text-blue-300">
+                  <ClockIcon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-slate-950 dark:text-white">{presentTodayWorkerIds.size} workers present today</p>
+                  <p className="mt-1 text-xs text-slate-500">Open live attendance</p>
+                </div>
+              </Link>
+              <Link href="/internal/attendance/settings" className="flex items-center gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-violet-200 hover:bg-violet-50/50 dark:border-slate-800 dark:hover:bg-violet-400/5">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-400/10 dark:text-violet-300">
+                  <LocationIcon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-slate-950 dark:text-white">{fieldFlexibleWorkerIds.size} field-flexible workers</p>
+                  <p className="mt-1 text-xs text-slate-500">Review geofence setup</p>
+                </div>
+              </Link>
               <Link href="/internal/qc" className="flex items-center gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50 dark:border-slate-800 dark:hover:bg-emerald-400/5">
                 <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300">
                   <CheckIcon className="h-5 w-5" />

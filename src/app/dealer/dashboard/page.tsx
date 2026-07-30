@@ -122,19 +122,19 @@ export default async function DealerDashboardPage() {
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-[26px] bg-gradient-to-br from-slate-950 via-blue-950 to-indigo-900 p-6 text-white shadow-xl shadow-blue-950/20">
-            <div className="absolute -right-14 -top-16 h-48 w-48 rounded-full bg-blue-400/20 blur-2xl" />
+          <div className="relative overflow-hidden rounded-[26px] border border-blue-100 bg-gradient-to-br from-white via-blue-50 to-indigo-50 p-6 text-slate-950 shadow-sm dark:border-white/10 dark:from-slate-950 dark:via-blue-950 dark:to-indigo-900 dark:text-white">
+            <div className="absolute -right-14 -top-16 h-48 w-48 rounded-full bg-blue-200/50 blur-2xl dark:bg-blue-400/20" />
             <div className="relative">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-200">Dealer account</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-200">Dealer account</p>
               <p className="mt-3 text-2xl font-black">{orderableProducts}</p>
-              <p className="mt-1 text-sm font-bold text-blue-100">products currently available to order</p>
+              <p className="mt-1 text-sm font-bold text-slate-600 dark:text-blue-100">products currently available to order</p>
               <div className="mt-6 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-                  <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-200">Member since</p>
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
+                  <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-600 dark:text-blue-200">Member since</p>
                   <p className="mt-2 text-sm font-black">{formatDealerDate(dealer.createdAt)}</p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-                  <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-200">Total orders</p>
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
+                  <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-600 dark:text-blue-200">Total orders</p>
                   <p className="mt-2 text-sm font-black">{allOrderStatuses.length}</p>
                 </div>
               </div>

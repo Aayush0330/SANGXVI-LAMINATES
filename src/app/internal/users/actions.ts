@@ -74,6 +74,24 @@ async function ownerCount() {
   });
 }
 
+class LastOwnerError extends Error {}
+
+async function assertActiveOwnerWillRemain(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(7420910842::bigint)`;
+  const count = await tx.user.count({
+    where: {
+      status: UserStatus.ACTIVE,
+      OR: [
+        { role: UserRole.OWNER },
+        { roleAssignments: { some: { role: UserRole.OWNER } } },
+      ],
+    },
+  });
+  if (count <= 1) throw new LastOwnerError();
+}
+
 function isCompanyEmployee(roles: UserRole[]) {
   return roles.some((assignedRole) => assignedRole !== UserRole.DEALER);
 }
@@ -251,7 +269,17 @@ export async function updateUserAction(formData: FormData) {
   const rolesNowIncludeEmployee = isCompanyEmployee(selected.roles);
   const workDate = getIndiaWorkDate();
 
-  await prisma.$transaction(async (tx) => {
+  try {
+    await prisma.$transaction(async (tx) => {
+    if (
+      oldRoles.includes(UserRole.OWNER) &&
+      old.status === UserStatus.ACTIVE &&
+      (!selected.roles.includes(UserRole.OWNER) ||
+        selectedStatus !== UserStatus.ACTIVE)
+    ) {
+      await assertActiveOwnerWillRemain(tx);
+    }
+
     await tx.user.update({
       where: { id },
       data: {
@@ -324,7 +352,11 @@ export async function updateUserAction(formData: FormData) {
         },
       });
     }
-  });
+    });
+  } catch (error) {
+    if (error instanceof LastOwnerError) go("last-owner-required");
+    throw error;
+  }
 
   await deleteUserSessions(id);
   await createSecurityAuditLog({
@@ -401,7 +433,15 @@ export async function deleteUserAction(formData: FormData) {
 
   const reason = exitReason || "Employment ended";
   const workDate = getIndiaWorkDate();
-  await prisma.$transaction(async (tx) => {
+  try {
+    await prisma.$transaction(async (tx) => {
+    if (
+      roles.includes(UserRole.OWNER) &&
+      user.status === UserStatus.ACTIVE
+    ) {
+      await assertActiveOwnerWillRemain(tx);
+    }
+
     await tx.user.update({
       where: { id },
       data: {
@@ -446,7 +486,11 @@ export async function deleteUserAction(formData: FormData) {
         },
       });
     }
-  });
+    });
+  } catch (error) {
+    if (error instanceof LastOwnerError) go("last-owner-required");
+    throw error;
+  }
 
   await deleteUserSessions(id);
   await createSecurityAuditLog({

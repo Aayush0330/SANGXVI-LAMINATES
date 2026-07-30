@@ -391,16 +391,16 @@ export default async function InventoryInsightsPage() {
   return (
     <main className="space-y-6">
       <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-950 dark:shadow-none">
-        <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-6 text-white sm:p-8">
+        <div className="bg-gradient-to-br from-white via-slate-50 to-blue-50 p-6 text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 dark:text-white sm:p-8">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-200">
+              <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-600 dark:text-blue-200">
                 Inventory Insights
               </p>
               <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">
                 Stock, sales and aging analysis
               </h1>
-              <p className="mt-3 max-w-4xl text-sm font-semibold leading-6 text-slate-300">
+              <p className="mt-3 max-w-4xl text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300">
                 Live product-wise inventory view showing current stock, available
                 stock, stock aging, total sold quantity, last sale, highest sale
                 and reorder risk from ERP data.
@@ -410,13 +410,13 @@ export default async function InventoryInsightsPage() {
             <div className="flex flex-wrap gap-3">
               <Link
                 href="/internal/inventory"
-                className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
+                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-white/15 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
               >
                 Manage Inventory
               </Link>
               <Link
                 href="/internal/inventory/calendar"
-                className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-blue-50"
+                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white transition hover:bg-blue-700 dark:bg-white dark:text-slate-950 dark:hover:bg-blue-50"
               >
                 Stock Calendar
               </Link>

@@ -3,7 +3,6 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getPortalLandingPath } from "@/lib/current-user";
-import { setMustChangePassword } from "@/lib/password-change-state";
 import {
   hashPassword,
   isStrongEnoughPassword,
@@ -11,6 +10,7 @@ import {
 } from "@/lib/password";
 import {
   clearForcePasswordChangeCookie,
+  createAuthSession,
   getCurrentSession,
 } from "@/lib/session";
 import { createSecurityAuditLog } from "@/lib/security-audit";
@@ -81,17 +81,20 @@ export async function changeOwnPasswordAction(formData: FormData) {
     redirect("/account/change-password?error=same-password");
   }
 
-  await prisma.user.update({
-    where: {
-      id: session.user.id,
-    },
-    data: {
-      passwordHash: hashPassword(newPassword),
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: session.user.id },
+      data: {
+        passwordHash: hashPassword(newPassword),
+        mustChangePassword: false,
+      },
+    });
+    await tx.authSession.deleteMany({
+      where: { userId: session.user.id },
+    });
   });
 
-  await setMustChangePassword(session.user.id, false);
-
+  await createAuthSession(session.user.id);
   await clearForcePasswordChangeCookie();
 
   await createSecurityAuditLog({

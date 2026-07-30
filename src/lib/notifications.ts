@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import type { AppUser } from "./current-user";
 import type { UserRole } from "./permissions";
+import { normalizeInternalHref } from "./safe-internal-href";
 
 type NotificationClient = Pick<typeof prisma, "$executeRaw" | "$queryRaw">;
 
@@ -52,6 +53,10 @@ const appRoleToPrismaRole: Record<UserRole, string> = {
 
 function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+export function normalizeNotificationHref(href?: string | null) {
+  return normalizeInternalHref(href);
 }
 
 export function formatNotificationTime(value: Date | string) {
@@ -302,6 +307,7 @@ export async function createWorkflowNotification({
   const requestedNotificationId = randomUUID();
   const storedPriority = normalizeNotificationPriority(priority);
   const normalizedDedupeKey = dedupeKey?.trim().slice(0, 240) || null;
+  const normalizedHref = normalizeNotificationHref(href);
 
   const notificationRows = await client.$queryRaw<{ id: string }[]>`
     INSERT INTO public."Notification" (
@@ -325,7 +331,7 @@ export async function createWorkflowNotification({
       ${title.slice(0, 180)},
       ${message.slice(0, 1200)},
       ${module},
-      ${href ?? null},
+      ${normalizedHref},
       ${storedPriority},
       'OPEN',
       ${normalizedDedupeKey},
@@ -354,7 +360,8 @@ export async function createWorkflowNotification({
       "resolvedById" = NULL,
       "resolutionNote" = NULL,
       "escalatedAt" = NULL,
-      "expiresAt" = EXCLUDED."expiresAt"
+      "expiresAt" = EXCLUDED."expiresAt",
+      "createdAt" = CURRENT_TIMESTAMP
     RETURNING "id"
   `;
   const notificationId = notificationRows[0]?.id ?? requestedNotificationId;
@@ -376,7 +383,25 @@ export async function createWorkflowNotification({
 
   if (prismaRoles.length > 0) {
     const roleRecipients = await client.$queryRaw<ActiveRecipientRow[]>`
-      SELECT u."id", u."name", u."role"::text AS "role"
+      SELECT
+        u."id",
+        u."name",
+        COALESCE(
+          CASE
+            WHEN u."role"::text IN (${Prisma.join(prismaRoles)})
+              THEN u."role"::text
+            ELSE NULL
+          END,
+          (
+            SELECT ura."role"::text
+            FROM public."UserRoleAssignment" ura
+            WHERE ura."userId" = u."id"
+              AND ura."role"::text IN (${Prisma.join(prismaRoles)})
+            ORDER BY ura."isPrimary" DESC, ura."createdAt" ASC
+            LIMIT 1
+          ),
+          u."role"::text
+        ) AS "role"
       FROM public."User" u
       WHERE u."status" = 'ACTIVE'::public."UserStatus"
         AND (
@@ -411,7 +436,11 @@ export async function createWorkflowNotification({
         ${recipient.role}::public."UserRole",
         CURRENT_TIMESTAMP
       )
-      ON CONFLICT ("notificationId", "userId") DO NOTHING
+      ON CONFLICT ("notificationId", "userId") DO UPDATE SET
+        "id" = EXCLUDED."id",
+        "roleSnapshot" = EXCLUDED."roleSnapshot",
+        "readAt" = NULL,
+        "createdAt" = CURRENT_TIMESTAMP
     `;
   }
 
@@ -463,7 +492,10 @@ export async function getNotificationSummaryForUser(
   return {
     unreadCount: Number(countRows[0]?.unreadCount ?? 0),
     readCount: Number(countRows[0]?.readCount ?? 0),
-    notifications,
+    notifications: notifications.map((notification) => ({
+      ...notification,
+      href: normalizeNotificationHref(notification.href),
+    })),
   };
 }
 

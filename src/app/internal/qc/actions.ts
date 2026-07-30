@@ -26,9 +26,17 @@ function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
-function qcUrl(type: "error" | "success", value: string) {
-  return `/internal/qc?${type}=${encodeURIComponent(value)}`;
+function qcUrl(
+  type: "error" | "success",
+  value: string,
+  focusOrderId?: string,
+) {
+  const params = new URLSearchParams({ [type]: value });
+  if (focusOrderId) params.set("order", focusOrderId);
+  return `/internal/qc?${params.toString()}${focusOrderId ? "#qc-detail" : ""}`;
 }
+
+class QcStateError extends Error {}
 
 async function assertQcAccess() {
   const { currentUser, hasAccess } = await checkPermission(
@@ -46,10 +54,13 @@ async function assertQcAccess() {
 export async function approveQcAction(formData: FormData) {
   const currentUser = await assertQcAccess();
   const orderId = cleanText(formData.get("orderId"));
+  const focusOrderId = cleanText(formData.get("focusOrderId")) || orderId;
   const qcNotes = cleanText(formData.get("qcNotes"));
+  const feedbackUrl = (type: "error" | "success", value: string) =>
+    qcUrl(type, value, focusOrderId);
 
   if (!orderId) {
-    redirect(qcUrl("error", "missing-order"));
+    redirect(feedbackUrl("error", "missing-order"));
   }
 
   const order = await prisma.order.findUnique({
@@ -65,11 +76,11 @@ export async function approveQcAction(formData: FormData) {
   });
 
   if (!order) {
-    redirect(qcUrl("error", "order-not-found"));
+    redirect(feedbackUrl("error", "order-not-found"));
   }
 
   if (order.status !== OrderStatus.PENDING_QC) {
-    redirect(qcUrl("error", "invalid-status"));
+    redirect(feedbackUrl("error", "invalid-status"));
   }
 
   if (
@@ -78,7 +89,7 @@ export async function approveQcAction(formData: FormData) {
       (assignment) => assignment.status !== PhysicalCheckStatus.READY_FOR_QC,
     )
   ) {
-    redirect(qcUrl("error", "physical-checks-incomplete"));
+    redirect(feedbackUrl("error", "physical-checks-incomplete"));
   }
 
   const incompleteItem = order.items.find((item) => {
@@ -98,11 +109,18 @@ export async function approveQcAction(formData: FormData) {
   });
 
   if (incompleteItem) {
-    redirect(qcUrl("error", "full-quantity-required"));
+    redirect(feedbackUrl("error", "full-quantity-required"));
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.orderPhysicalAssignment.updateMany({
+  try {
+    await prisma.$transaction(async (tx) => {
+    const transitioned = await tx.order.updateMany({
+      where: { id: order.id, status: OrderStatus.PENDING_QC },
+      data: { status: OrderStatus.QC_APPROVED },
+    });
+    if (transitioned.count !== 1) throw new QcStateError();
+
+    const assignmentsUpdated = await tx.orderPhysicalAssignment.updateMany({
       where: {
         orderId: order.id,
         status: PhysicalCheckStatus.READY_FOR_QC,
@@ -115,11 +133,9 @@ export async function approveQcAction(formData: FormData) {
         qcNotes: qcNotes || null,
       },
     });
-
-    await tx.order.update({
-      where: { id: order.id },
-      data: { status: OrderStatus.QC_APPROVED },
-    });
+    if (assignmentsUpdated.count !== order.physicalAssignments.length) {
+      throw new QcStateError();
+    }
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
@@ -153,7 +169,13 @@ export async function approveQcAction(formData: FormData) {
       recipientRoles: ["owner", "manager", "qc_team"],
       priority: "HIGH_ALERT",
     });
-  });
+    });
+  } catch (error) {
+    if (error instanceof QcStateError) {
+      redirect(feedbackUrl("error", "invalid-status"));
+    }
+    throw error;
+  }
 
   await createSecurityAuditLog({
     eventType: "QC_APPROVED",
@@ -169,20 +191,23 @@ export async function approveQcAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect(qcUrl("success", "qc-approved"));
+  redirect(feedbackUrl("success", "qc-approved"));
 }
 
 export async function requestQcReworkAction(formData: FormData) {
   const currentUser = await assertQcAccess();
   const assignmentId = cleanText(formData.get("assignmentId"));
+  const focusOrderId = cleanText(formData.get("focusOrderId"));
   const qcNotes = cleanText(formData.get("qcNotes"));
+  const feedbackUrl = (type: "error" | "success", value: string) =>
+    qcUrl(type, value, focusOrderId);
 
   if (!assignmentId) {
-    redirect(qcUrl("error", "missing-assignment"));
+    redirect(feedbackUrl("error", "missing-assignment"));
   }
 
   if (!qcNotes) {
-    redirect(qcUrl("error", "rework-note-required"));
+    redirect(feedbackUrl("error", "rework-note-required"));
   }
 
   const assignment = await prisma.orderPhysicalAssignment.findUnique({
@@ -201,19 +226,33 @@ export async function requestQcReworkAction(formData: FormData) {
   });
 
   if (!assignment) {
-    redirect(qcUrl("error", "assignment-not-found"));
+    redirect(feedbackUrl("error", "assignment-not-found"));
   }
 
   if (
     assignment.order.status !== OrderStatus.PENDING_QC ||
     assignment.status !== PhysicalCheckStatus.READY_FOR_QC
   ) {
-    redirect(qcUrl("error", "invalid-rework-status"));
+    redirect(feedbackUrl("error", "invalid-rework-status"));
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.orderPhysicalAssignment.update({
-      where: { id: assignment.id },
+  try {
+    await prisma.$transaction(async (tx) => {
+    const orderTransitioned = await tx.order.updateMany({
+      where: {
+        id: assignment.orderId,
+        status: OrderStatus.PENDING_QC,
+      },
+      data: { status: OrderStatus.QC_REWORK },
+    });
+    if (orderTransitioned.count !== 1) throw new QcStateError();
+
+    const assignmentTransitioned =
+      await tx.orderPhysicalAssignment.updateMany({
+      where: {
+        id: assignment.id,
+        status: PhysicalCheckStatus.READY_FOR_QC,
+      },
       data: {
         status: PhysicalCheckStatus.QC_REWORK,
         qcRejectedById: currentUser.id,
@@ -222,11 +261,7 @@ export async function requestQcReworkAction(formData: FormData) {
         qcNotes,
       },
     });
-
-    await tx.order.update({
-      where: { id: assignment.orderId },
-      data: { status: OrderStatus.QC_REWORK },
-    });
+    if (assignmentTransitioned.count !== 1) throw new QcStateError();
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
@@ -268,7 +303,13 @@ export async function requestQcReworkAction(formData: FormData) {
       recipientUserIds: assignment.team.members.map((member) => member.userId),
       priority: "BLOCKER",
     });
-  });
+    });
+  } catch (error) {
+    if (error instanceof QcStateError) {
+      redirect(feedbackUrl("error", "invalid-rework-status"));
+    }
+    throw error;
+  }
 
   await createSecurityAuditLog({
     eventType: "QC_REWORK_REQUESTED",
@@ -284,18 +325,21 @@ export async function requestQcReworkAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect(qcUrl("success", "rework-requested"));
+  redirect(feedbackUrl("success", "rework-requested"));
 }
 
 export async function assignTransportFromQcAction(formData: FormData) {
   const currentUser = await assertQcAccess();
   const orderId = cleanText(formData.get("orderId"));
+  const focusOrderId = cleanText(formData.get("focusOrderId")) || orderId;
   const driverId = cleanText(formData.get("driverId"));
   const transportOptionId = cleanText(formData.get("transportOptionId"));
+  const feedbackUrl = (type: "error" | "success", value: string) =>
+    qcUrl(type, value, focusOrderId);
 
-  if (!orderId) redirect(qcUrl("error", "missing-order"));
-  if (!driverId) redirect(qcUrl("error", "missing-driver"));
-  if (!transportOptionId) redirect(qcUrl("error", "missing-transport"));
+  if (!orderId) redirect(feedbackUrl("error", "missing-order"));
+  if (!driverId) redirect(feedbackUrl("error", "missing-driver"));
+  if (!transportOptionId) redirect(feedbackUrl("error", "missing-transport"));
 
   const [order, driver, transportOption] = await Promise.all([
     prisma.order.findUnique({
@@ -322,11 +366,11 @@ export async function assignTransportFromQcAction(formData: FormData) {
     }),
   ]);
 
-  if (!order) redirect(qcUrl("error", "order-not-found"));
-  if (!driver) redirect(qcUrl("error", "driver-not-found"));
-  if (!transportOption) redirect(qcUrl("error", "transport-not-found"));
+  if (!order) redirect(feedbackUrl("error", "order-not-found"));
+  if (!driver) redirect(feedbackUrl("error", "driver-not-found"));
+  if (!transportOption) redirect(feedbackUrl("error", "transport-not-found"));
   if (order.status !== OrderStatus.QC_APPROVED) {
-    redirect(qcUrl("error", "transport-status-invalid"));
+    redirect(feedbackUrl("error", "transport-status-invalid"));
   }
 
   const incompleteDelivery =
@@ -346,12 +390,13 @@ export async function assignTransportFromQcAction(formData: FormData) {
     });
 
   if (incompleteDelivery) {
-    redirect(qcUrl("error", "full-quantity-required"));
+    redirect(feedbackUrl("error", "full-quantity-required"));
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: order.id },
+  try {
+    await prisma.$transaction(async (tx) => {
+    const transitioned = await tx.order.updateMany({
+      where: { id: order.id, status: OrderStatus.QC_APPROVED },
       data: {
         status: OrderStatus.TRANSPORT_ASSIGNED,
         assignedDriverId: driver.id,
@@ -359,6 +404,7 @@ export async function assignTransportFromQcAction(formData: FormData) {
         transportLabel: transportOption.name,
       },
     });
+    if (transitioned.count !== 1) throw new QcStateError();
 
     await recordOrderStatusHistory({
       client: tx as unknown as HistoryClient,
@@ -381,7 +427,13 @@ export async function assignTransportFromQcAction(formData: FormData) {
       recipientUserIds: [driver.id],
       priority: "HIGH_ALERT",
     });
-  });
+    });
+  } catch (error) {
+    if (error instanceof QcStateError) {
+      redirect(feedbackUrl("error", "transport-status-invalid"));
+    }
+    throw error;
+  }
 
   await createSecurityAuditLog({
     eventType: "TRANSPORT_ASSIGNED",
@@ -397,5 +449,5 @@ export async function assignTransportFromQcAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect(qcUrl("success", "transport-assigned"));
+  redirect(feedbackUrl("success", "transport-assigned"));
 }

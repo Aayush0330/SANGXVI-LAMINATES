@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 
 export default function OfflinePage() {
   return (
@@ -19,12 +20,12 @@ export default function OfflinePage() {
           Connect to the internet to securely load the latest orders,
           attendance, and business data.
         </p>
-        <a
+        <Link
           href="/"
           className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
         >
           Try Again
-        </a>
+        </Link>
       </div>
     </main>
   );

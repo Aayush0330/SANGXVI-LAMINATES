@@ -5,6 +5,10 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { Client } from "pg";
+import {
+  getBackupDirectory,
+  resolveStoredFile,
+} from "@/lib/runtime-storage";
 
 export type BackupKind = "MANUAL" | "AUTOMATIC" | "RESTORE_POINT";
 
@@ -19,9 +23,17 @@ export type BackupResult = {
   createdAt: string;
 };
 
-const backupDir = process.env.BACKUP_DIR || "backups/database";
-const retentionDays = Number.parseInt(process.env.BACKUP_RETENTION_DAYS || "30", 10);
-const pgDumpPath = process.env.PG_DUMP_PATH || "pg_dump";
+const configuredRetentionDays = Number.parseInt(
+  process.env.BACKUP_RETENTION_DAYS || "30",
+  10,
+);
+const retentionDays =
+  Number.isInteger(configuredRetentionDays) &&
+  configuredRetentionDays >= 1 &&
+  configuredRetentionDays <= 3_650
+    ? configuredRetentionDays
+    : 30;
+const backupAdvisoryLock = 7_420_910_841;
 
 function databaseUrl() {
   const value = process.env.BACKUP_DATABASE_URL || process.env.DATABASE_URL;
@@ -66,7 +78,11 @@ async function bestEffortQuery(text: string, values: unknown[] = []) {
     return await withClient((client) => client.query(text, values));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/relation "(?:public\.)?BackupRecord" does not exist/i.test(message)) {
+    if (
+      /relation "(?:public\.)?(?:BackupRecord|RestoreAudit)" does not exist/i.test(
+        message,
+      )
+    ) {
       return null;
     }
     throw error;
@@ -89,7 +105,10 @@ async function waitForProcess(child: ReturnType<typeof spawn>, getError: () => s
 
 export async function sha256File(filePath: string) {
   const hash = createHash("sha256");
-  await pipeline(createReadStream(filePath), hash);
+  await pipeline(
+    createReadStream(/* turbopackIgnore: true */ filePath),
+    hash,
+  );
   return hash.digest("hex");
 }
 
@@ -97,13 +116,20 @@ async function deleteExpiredBackups(targetDir: string, days: number) {
   if (!Number.isFinite(days) || days <= 0) return [] as string[];
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
   const deleted: string[] = [];
-  for (const fileName of await fs.readdir(targetDir)) {
+  for (const fileName of await fs.readdir(
+    /* turbopackIgnore: true */ targetDir,
+  )) {
     if (!fileName.endsWith(".sql.gz")) continue;
-    const filePath = path.join(targetDir, fileName);
-    const stat = await fs.stat(filePath);
+    const filePath = path.join(
+      /* turbopackIgnore: true */ targetDir,
+      fileName,
+    );
+    const stat = await fs.stat(/* turbopackIgnore: true */ filePath);
     if (stat.mtimeMs >= cutoff) continue;
-    await fs.unlink(filePath);
-    await fs.unlink(`${filePath}.manifest.json`).catch(() => undefined);
+    await fs.unlink(/* turbopackIgnore: true */ filePath);
+    await fs
+      .unlink(/* turbopackIgnore: true */ `${filePath}.manifest.json`)
+      .catch(() => undefined);
     deleted.push(filePath);
     await bestEffortQuery(
       `UPDATE public."BackupRecord" SET "status"='DELETED' WHERE "filePath"=$1 AND "status"='SUCCESS'`,
@@ -121,8 +147,11 @@ export async function createDatabaseBackup(options: {
   const kind = options.kind ?? "MANUAL";
   const id = randomUUID();
   const createdAt = new Date().toISOString();
-  const targetDir = path.resolve(/* turbopackIgnore: true */ process.cwd(), backupDir);
-  await fs.mkdir(targetDir, { recursive: true });
+  const targetDir = getBackupDirectory();
+  await fs.mkdir(/* turbopackIgnore: true */ targetDir, {
+    recursive: true,
+    mode: 0o700,
+  });
 
   await bestEffortQuery(
     `INSERT INTO public."BackupRecord" ("id","kind","status","retentionDays","triggeredById","triggeredBy","startedAt","createdAt") VALUES ($1,$2,'RUNNING',$3,$4,$5,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
@@ -130,21 +159,27 @@ export async function createDatabaseBackup(options: {
   );
 
   const fileName = `sanghvi-erp-${kind.toLowerCase()}-${timestamp()}.sql.gz`;
-  const filePath = path.join(targetDir, fileName);
+  const filePath = path.join(
+    /* turbopackIgnore: true */ targetDir,
+    fileName,
+  );
   const manifestPath = `${filePath}.manifest.json`;
   let errorOutput = "";
+  const lockClient = new Client({ connectionString: sanitizedUrl(databaseUrl()) });
 
   try {
-    // Prisma Postgres Dev can reuse a backend session after pg_dump exits and
-    // leave pg_dump's named enum statement behind. Clear session-local prepared
-    // statements so repeated manual, automatic and cron backups stay reliable.
-    await withClient((client) => client.query("DEALLOCATE ALL"));
+    await lockClient.connect();
+    const lockResult = await lockClient.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock($1::bigint) AS acquired",
+      [backupAdvisoryLock],
+    );
+    if (!lockResult.rows[0]?.acquired) {
+      throw new Error("Another database backup is already running.");
+    }
 
     const pgDump = spawn(
-      /* turbopackIgnore: true */ pgDumpPath,
+      "pg_dump",
       [
-        "--dbname",
-        sanitizedUrl(databaseUrl()),
         "--format=plain",
         "--inserts",
         "--exclude-schema=_prisma_dev_wal",
@@ -154,29 +189,49 @@ export async function createDatabaseBackup(options: {
         "--clean",
         "--if-exists",
       ],
-      { env: process.env, stdio: ["ignore", "pipe", "pipe"] },
+      {
+        env: {
+          ...process.env,
+          PGDATABASE: sanitizedUrl(databaseUrl()),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
     pgDump.stderr.on("data", (chunk: Buffer) => {
-      errorOutput += chunk.toString();
+      if (errorOutput.length < 16_384) {
+        errorOutput += chunk.toString().slice(0, 16_384 - errorOutput.length);
+      }
     });
     await Promise.all([
-      pipeline(pgDump.stdout, createGzip({ level: 9 }), createWriteStream(filePath)),
+      pipeline(
+        pgDump.stdout,
+        createGzip({ level: 9 }),
+        createWriteStream(/* turbopackIgnore: true */ filePath, {
+          mode: 0o600,
+        }),
+      ),
       waitForProcess(pgDump, () => errorOutput),
     ]);
 
-    const stat = await fs.stat(filePath);
+    const stat = await fs.stat(/* turbopackIgnore: true */ filePath);
     const sha256 = await sha256File(filePath);
     const manifest = {
       version: 1,
       id,
       kind,
       fileName,
-      filePath,
       sizeBytes: stat.size,
       sha256,
       createdAt,
     };
-    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    await fs.writeFile(
+      /* turbopackIgnore: true */ manifestPath,
+      JSON.stringify(manifest, null, 2),
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
     await bestEffortQuery(
       `UPDATE public."BackupRecord" SET "status"='SUCCESS',"fileName"=$2,"filePath"=$3,"sizeBytes"=$4,"sha256"=$5,"manifestPath"=$6,"completedAt"=CURRENT_TIMESTAMP,"verifiedAt"=CURRENT_TIMESTAMP WHERE "id"=$1`,
       [id, fileName, filePath, stat.size, sha256, manifestPath],
@@ -184,26 +239,38 @@ export async function createDatabaseBackup(options: {
     await deleteExpiredBackups(targetDir, retentionDays);
     return { id, kind, fileName, filePath, manifestPath, sizeBytes: stat.size, sha256, createdAt };
   } catch (error) {
-    await fs.unlink(filePath).catch(() => undefined);
+    await fs
+      .unlink(/* turbopackIgnore: true */ filePath)
+      .catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
     await bestEffortQuery(
       `UPDATE public."BackupRecord" SET "status"='FAILED',"errorMessage"=$2,"completedAt"=CURRENT_TIMESTAMP WHERE "id"=$1`,
       [id, message.slice(0, 2000)],
     );
     throw error;
+  } finally {
+    await lockClient
+      .query("SELECT pg_advisory_unlock($1::bigint)", [backupAdvisoryLock])
+      .catch(() => undefined);
+    await lockClient.end().catch(() => undefined);
   }
 }
 
 export async function verifyBackupFile(filePath: string) {
-  const resolved = path.resolve(/* turbopackIgnore: true */ process.cwd(), filePath);
-  const stat = await fs.stat(resolved);
+  const resolved = resolveStoredFile(getBackupDirectory(), filePath);
+  const stat = await fs.stat(/* turbopackIgnore: true */ resolved);
   const actualHash = await sha256File(resolved);
   const manifestPath = `${resolved}.manifest.json`;
   let expectedHash: string | null = null;
   let expectedSize: number | null = null;
 
   try {
-    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
+    const manifest = JSON.parse(
+      await fs.readFile(
+        /* turbopackIgnore: true */ manifestPath,
+        "utf8",
+      ),
+    ) as {
       sha256?: string;
       sizeBytes?: number;
     };
@@ -245,7 +312,25 @@ export async function recordRestoreAudit(input: {
     return;
   }
   await bestEffortQuery(
-    `UPDATE public."RestoreAudit" SET "status"=$2,"errorMessage"=$3,"completedAt"=CURRENT_TIMESTAMP WHERE "id"=$1`,
-    [input.id, input.status, input.errorMessage ?? null],
+    `INSERT INTO public."RestoreAudit" (
+       "id","fileName","filePath","sha256","status","errorMessage",
+       "triggeredBy","startedAt","completedAt","createdAt"
+     )
+     VALUES (
+       $1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+     )
+     ON CONFLICT ("id") DO UPDATE SET
+       "status"=EXCLUDED."status",
+       "errorMessage"=EXCLUDED."errorMessage",
+       "completedAt"=CURRENT_TIMESTAMP`,
+    [
+      input.id,
+      input.fileName,
+      input.filePath,
+      input.sha256 ?? null,
+      input.status,
+      input.errorMessage ?? null,
+      input.triggeredBy ?? null,
+    ],
   );
 }

@@ -82,22 +82,28 @@ async function cancelOrderAndReleaseStock({
     const blockedQuantity = item.blockedQuantity;
 
     if (blockedQuantity > 0) {
-      const nextAvailableQuantity = item.product.quantity + blockedQuantity;
-      const nextBlockedStock = Math.max(
-        0,
-        item.product.blocked - blockedQuantity,
-      );
-
-      await tx.product.update({
+      const released = await tx.product.updateMany({
         where: {
           id: item.productId,
+          blocked: { gte: blockedQuantity },
         },
         data: {
-          quantity: nextAvailableQuantity,
-          blocked: nextBlockedStock,
+          quantity: { increment: blockedQuantity },
+          blocked: { decrement: blockedQuantity },
+        },
+      });
+      if (released.count !== 1) throw new Error("STOCK_STATE_CHANGED");
+
+      const updatedProduct = await tx.product.findUniqueOrThrow({
+        where: { id: item.productId },
+        select: { quantity: true, minimumStock: true },
+      });
+      await tx.product.update({
+        where: { id: item.productId },
+        data: {
           status: getProductStatus(
-            nextAvailableQuantity,
-            item.product.minimumStock,
+            updatedProduct.quantity,
+            updatedProduct.minimumStock,
           ),
         },
       });
@@ -115,20 +121,51 @@ async function cancelOrderAndReleaseStock({
       });
     }
 
-    await tx.orderItem.update({
+    const itemUpdated = await tx.orderItem.updateMany({
       where: {
         id: item.id,
+        requestedQuantity: closure.requested,
+        quantity: closure.workingQuantity,
+        blockedQuantity,
+        deliveredQuantity: 0,
+        cancelledQuantity: 0,
       },
       data: {
         requestedQuantity: closure.requested,
-        quantity: closure.workingQuantity,
+        quantity: closure.requested,
         blockedQuantity: 0,
+        deliveredQuantity: 0,
         cancelledQuantity: closure.cancelled,
       },
     });
+    if (itemUpdated.count !== 1) throw new Error("ORDER_STATUS_CHANGED");
   }
 
   return OrderStatus.CANCELLED;
+}
+
+type LockedDealerOrder = {
+  id: string;
+  dealerId: string;
+  orderNumber: string;
+  status: OrderStatus;
+};
+
+async function getLockedDealerOrder(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  orderId: string,
+) {
+  const rows = await tx.$queryRaw<LockedDealerOrder[]>`
+    SELECT
+      "id",
+      "dealerId",
+      "orderNumber",
+      "status"
+    FROM public."Order"
+    WHERE "id" = ${orderId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
 }
 
 export async function cancelDealerOrderAction(formData: FormData) {
@@ -170,11 +207,14 @@ export async function cancelDealerOrderAction(formData: FormData) {
   if (DIRECT_DEALER_CANCEL_STATUSES.includes(order.status)) {
     try {
       await prisma.$transaction(async (tx) => {
-        const transitioned = await tx.order.updateMany({
-          where: { id: order.id, dealerId: dealer.id, status: order.status },
-          data: { status: OrderStatus.CANCELLED, assignedDriverId: null },
-        });
-        if (transitioned.count !== 1) throw new Error("ORDER_STATUS_CHANGED");
+        const lockedOrder = await getLockedDealerOrder(tx, order.id);
+        if (
+          !lockedOrder ||
+          lockedOrder.dealerId !== dealer.id ||
+          !DIRECT_DEALER_CANCEL_STATUSES.includes(lockedOrder.status)
+        ) {
+          throw new Error("ORDER_STATUS_CHANGED");
+        }
 
         const nextStatus = await cancelOrderAndReleaseStock({
           tx,
@@ -182,10 +222,20 @@ export async function cancelDealerOrderAction(formData: FormData) {
           currentUser,
         });
 
+        const transitioned = await tx.order.updateMany({
+          where: {
+            id: lockedOrder.id,
+            dealerId: dealer.id,
+            status: lockedOrder.status,
+          },
+          data: { status: OrderStatus.CANCELLED, assignedDriverId: null },
+        });
+        if (transitioned.count !== 1) throw new Error("ORDER_STATUS_CHANGED");
+
         await recordOrderStatusHistory({
           client: tx as unknown as HistoryClient,
           orderId: order.id,
-          fromStatus: order.status,
+          fromStatus: lockedOrder.status,
           toStatus: nextStatus,
           title: "Order Cancelled by Dealer",
           description:
@@ -203,7 +253,11 @@ export async function cancelDealerOrderAction(formData: FormData) {
     } catch (error) {
       if (
         error instanceof Error &&
-        ["ORDER_STATUS_CHANGED", "ORDER_NOT_FOUND"].includes(error.message)
+        [
+          "ORDER_STATUS_CHANGED",
+          "ORDER_NOT_FOUND",
+          "STOCK_STATE_CHANGED",
+        ].includes(error.message)
       ) {
         redirect("/dealer/orders?error=cancel-not-allowed");
       }

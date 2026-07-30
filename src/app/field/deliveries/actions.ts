@@ -37,6 +37,22 @@ function getProductStatus(quantity: number, minimumStock: number) {
   return ProductStatus.AVAILABLE;
 }
 
+class DeliveryTransitionError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+  }
+}
+
+function deliveryPageUrl(
+  type: "error" | "success",
+  value: string,
+  orderId?: string,
+) {
+  const params = new URLSearchParams({ [type]: value });
+  if (orderId) params.set("order", orderId);
+  return `/field/deliveries?${params.toString()}#delivery-detail`;
+}
+
 export async function markOnTheWayAction(formData: FormData) {
   const { currentUser, hasAccess } = await checkPermission(
     "update_delivery_status"
@@ -52,65 +68,56 @@ export async function markOnTheWayAction(formData: FormData) {
     redirect("/field/deliveries?error=missing-order");
   }
 
-  const driver = await prisma.user.findUnique({
-    where: {
-      email: currentUser.email,
-    },
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      const order = await getLockedDeliveryOrder(tx, orderId);
+      if (!order) throw new DeliveryTransitionError("order-not-found");
+      if (order.assignedDriverId !== currentUser.id) {
+        throw new DeliveryTransitionError("not-your-delivery");
+      }
+      if (order.status !== OrderStatus.TRANSPORT_ASSIGNED) {
+        throw new DeliveryTransitionError("invalid-status");
+      }
 
-  if (!driver) {
-    redirect("/field/deliveries?error=driver-not-found");
-  }
+      const transitioned = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          assignedDriverId: currentUser.id,
+          status: OrderStatus.TRANSPORT_ASSIGNED,
+        },
+        data: { status: OrderStatus.ON_THE_WAY },
+      });
+      if (transitioned.count !== 1) {
+        throw new DeliveryTransitionError("invalid-status");
+      }
 
-  const order = await prisma.order.findUnique({
-    where: {
-      id: orderId,
-    },
-  });
+      await recordOrderStatusHistory({
+        client: tx as unknown as HistoryClient,
+        orderId: order.id,
+        fromStatus: OrderStatus.TRANSPORT_ASSIGNED,
+        toStatus: OrderStatus.ON_THE_WAY,
+        title: "Order On The Way",
+        description: "Driver marked the order as on the way.",
+        currentUser,
+      });
 
-  if (!order) {
-    redirect("/field/deliveries?error=order-not-found");
-  }
-
-  if (order.assignedDriverId !== driver.id) {
-    redirect("/field/deliveries?error=not-your-delivery");
-  }
-
-  if (order.status !== OrderStatus.TRANSPORT_ASSIGNED) {
-    redirect("/field/deliveries?error=invalid-status");
-  }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: {
-        id: order.id,
-      },
-      data: {
-        status: OrderStatus.ON_THE_WAY,
-      },
+      await createWorkflowNotification({
+        client: tx,
+        title: "Order on the way",
+        message: `${order.orderNumber} is now out for delivery.`,
+        module: "DELIVERY",
+        href: "/dealer/orders",
+        orderId: order.id,
+        actor: currentUser,
+        recipientUserIds: [order.dealerId],
+      });
     });
-
-    await recordOrderStatusHistory({
-      client: tx as unknown as HistoryClient,
-      orderId: order.id,
-      fromStatus: order.status,
-      toStatus: OrderStatus.ON_THE_WAY,
-      title: "Order On The Way",
-      description: "Driver marked the order as on the way.",
-      currentUser,
-    });
-
-    await createWorkflowNotification({
-      client: tx,
-      title: "Order on the way",
-      message: `${order.orderNumber} is now out for delivery.`,
-      module: "DELIVERY",
-      href: "/dealer/orders",
-      orderId: order.id,
-      actor: currentUser,
-      recipientUserIds: [order.dealerId],
-    });
-  });
+  } catch (error) {
+    if (error instanceof DeliveryTransitionError) {
+      redirect(deliveryPageUrl("error", error.code, orderId));
+    }
+    throw error;
+  }
 
   revalidatePath("/field/deliveries");
   revalidatePath("/internal/dispatch");
@@ -119,7 +126,7 @@ export async function markOnTheWayAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect("/field/deliveries?success=on-the-way");
+  redirect(deliveryPageUrl("success", "on-the-way", orderId));
 }
 
 export async function markDeliveredAction(formData: FormData) {
@@ -132,117 +139,139 @@ export async function markDeliveredAction(formData: FormData) {
   const orderId = String(formData.get("orderId") ?? "");
   if (!orderId) redirect("/field/deliveries?error=missing-order");
 
-  const driver = await prisma.user.findUnique({
-    where: { email: currentUser.email },
-  });
-  if (!driver) redirect("/field/deliveries?error=driver-not-found");
-
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { items: { include: { product: true } } },
-  });
-  if (!order) redirect("/field/deliveries?error=order-not-found");
-  if (order.assignedDriverId !== driver.id) {
-    redirect("/field/deliveries?error=not-your-delivery");
-  }
-  if (order.status !== OrderStatus.ON_THE_WAY) {
-    redirect("/field/deliveries?error=invalid-status");
-  }
-
-  const incompleteItem = order.items.find((item) => {
-    const orderedQuantity =
-      item.requestedQuantity > 0 ? item.requestedQuantity : item.quantity;
-    return (
-      item.quantity !== orderedQuantity ||
-      item.blockedQuantity !== orderedQuantity ||
-      item.product.blocked < orderedQuantity ||
-      item.deliveredQuantity !== 0 ||
-      item.cancelledQuantity !== 0
-    );
-  });
-
-  if (incompleteItem) {
-    redirect("/field/deliveries?error=complete-quantity-required");
-  }
-
   const deliveredAt = new Date();
-  const deliveredTotal = order.items.reduce(
-    (total, item) =>
-      total + (item.requestedQuantity > 0 ? item.requestedQuantity : item.quantity),
-    0,
-  );
+  try {
+    await prisma.$transaction(async (tx) => {
+      const lockedOrder = await getLockedDeliveryOrder(tx, orderId);
+      if (!lockedOrder) throw new DeliveryTransitionError("order-not-found");
+      if (lockedOrder.assignedDriverId !== currentUser.id) {
+        throw new DeliveryTransitionError("not-your-delivery");
+      }
+      if (lockedOrder.status !== OrderStatus.ON_THE_WAY) {
+        throw new DeliveryTransitionError("invalid-status");
+      }
 
-  await prisma.$transaction(async (tx) => {
-    for (const item of order.items) {
-      const orderedQuantity =
-        item.requestedQuantity > 0 ? item.requestedQuantity : item.quantity;
-      const nextBlocked = Math.max(0, item.product.blocked - orderedQuantity);
-
-      await tx.product.update({
-        where: { id: item.product.id },
-        data: {
-          blocked: nextBlocked,
-          status: getProductStatus(
-            item.product.quantity,
-            item.product.minimumStock,
-          ),
-        },
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: { include: { product: true } } },
       });
+      if (!order || order.items.length === 0) {
+        throw new DeliveryTransitionError("order-not-found");
+      }
 
-      await tx.orderItem.update({
-        where: { id: item.id },
-        data: {
-          requestedQuantity: orderedQuantity,
+      const incompleteItem = order.items.find((item) => {
+        const orderedQuantity =
+          item.requestedQuantity > 0 ? item.requestedQuantity : item.quantity;
+        return (
+          item.quantity !== orderedQuantity ||
+          item.blockedQuantity !== orderedQuantity ||
+          item.product.blocked < orderedQuantity ||
+          item.deliveredQuantity !== 0 ||
+          item.cancelledQuantity !== 0
+        );
+      });
+      if (incompleteItem) {
+        throw new DeliveryTransitionError("complete-quantity-required");
+      }
+
+      const deliveredTotal = order.items.reduce(
+        (total, item) =>
+          total +
+          (item.requestedQuantity > 0
+            ? item.requestedQuantity
+            : item.quantity),
+        0,
+      );
+
+      for (const item of order.items) {
+        const orderedQuantity =
+          item.requestedQuantity > 0 ? item.requestedQuantity : item.quantity;
+
+        const stockUpdated = await tx.product.updateMany({
+          where: {
+            id: item.product.id,
+            blocked: { gte: orderedQuantity },
+          },
+          data: {
+            blocked: { decrement: orderedQuantity },
+            status: getProductStatus(
+              item.product.quantity,
+              item.product.minimumStock,
+            ),
+          },
+        });
+        if (stockUpdated.count !== 1) {
+          throw new DeliveryTransitionError("complete-quantity-required");
+        }
+
+        const itemUpdated = await tx.orderItem.updateMany({
+          where: {
+            id: item.id,
+            requestedQuantity: orderedQuantity,
+            quantity: orderedQuantity,
+            blockedQuantity: orderedQuantity,
+            deliveredQuantity: 0,
+            cancelledQuantity: 0,
+          },
+          data: {
+            blockedQuantity: 0,
+            deliveredQuantity: orderedQuantity,
+          },
+        });
+        if (itemUpdated.count !== 1) {
+          throw new DeliveryTransitionError("invalid-status");
+        }
+
+        await closeStockBlockTimeline({
+          client: tx,
+          orderId: order.id,
+          orderItemId: item.id,
+          productId: item.productId,
           quantity: orderedQuantity,
-          blockedQuantity: 0,
-          deliveredQuantity: orderedQuantity,
-          cancelledQuantity: 0,
+          currentUser,
+          status: "CONSUMED",
+          releaseReason: "DELIVERED",
+          notes: `${orderedQuantity} blocked quantity consumed after complete delivery.`,
+        });
+      }
+
+      const transitioned = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          assignedDriverId: currentUser.id,
+          status: OrderStatus.ON_THE_WAY,
+        },
+        data: {
+          status: OrderStatus.DELIVERED,
+          deliveredById: currentUser.id,
+          deliveredByName: currentUser.name,
+          deliveredAt,
+          deliveryProofAssistanceStatus:
+            DeliveryProofAssistanceStatus.NOT_REQUESTED,
+          deliveryProofRequestedById: null,
+          deliveryProofRequestedByName: null,
+          deliveryProofRequestedAt: null,
+          deliveryProofRequestNote: null,
+          deliveryProofCompletedById: null,
+          deliveryProofCompletedByName: null,
+          deliveryProofCompletedAt: null,
         },
       });
+      if (transitioned.count !== 1) {
+        throw new DeliveryTransitionError("invalid-status");
+      }
 
-      await closeStockBlockTimeline({
-        client: tx,
+      await recordOrderStatusHistory({
+        client: tx as unknown as HistoryClient,
         orderId: order.id,
-        orderItemId: item.id,
-        productId: item.productId,
-        quantity: orderedQuantity,
+        fromStatus: OrderStatus.ON_THE_WAY,
+        toStatus: OrderStatus.DELIVERED,
+        title: "Order Delivered",
+        description: `${deliveredTotal} total quantity delivered in one complete delivery.`,
         currentUser,
-        status: "CONSUMED",
-        releaseReason: "DELIVERED",
-        notes: `${orderedQuantity} blocked quantity consumed after complete delivery.`,
       });
-    }
 
-    await tx.order.update({
-      where: { id: order.id },
-      data: {
-        status: OrderStatus.DELIVERED,
-        deliveredById: driver.id,
-        deliveredByName: driver.name,
-        deliveredAt,
-        deliveryProofAssistanceStatus:
-          DeliveryProofAssistanceStatus.NOT_REQUESTED,
-        deliveryProofRequestedById: null,
-        deliveryProofRequestedByName: null,
-        deliveryProofRequestedAt: null,
-        deliveryProofRequestNote: null,
-        deliveryProofCompletedById: null,
-        deliveryProofCompletedByName: null,
-        deliveryProofCompletedAt: null,
-      },
-    });
-
-    await recordOrderStatusHistory({
-      client: tx as unknown as HistoryClient,
-      orderId: order.id,
-      fromStatus: order.status,
-      toStatus: OrderStatus.DELIVERED,
-      title: "Order Delivered",
-      description: `${deliveredTotal} total quantity delivered in one complete delivery.`,
-      currentUser,
-    });
-
-    await createWorkflowNotification({
+      await createWorkflowNotification({
       client: tx,
       title: "Order delivered",
       message: `${order.orderNumber} has been delivered completely.`,
@@ -252,9 +281,9 @@ export async function markDeliveredAction(formData: FormData) {
       actor: currentUser,
       recipientUserIds: [order.dealerId],
       priority: "HIGH",
-    });
+      });
 
-    await createWorkflowNotification({
+      await createWorkflowNotification({
       client: tx,
       title: "Delivery completed",
       message: `${order.orderNumber} is fully delivered. Await signed invoice proof if required.`,
@@ -263,8 +292,14 @@ export async function markDeliveredAction(formData: FormData) {
       orderId: order.id,
       actor: currentUser,
       recipientRoles: ["owner", "manager", "dispatch_team"],
+      });
     });
-  });
+  } catch (error) {
+    if (error instanceof DeliveryTransitionError) {
+      redirect(deliveryPageUrl("error", error.code, orderId));
+    }
+    throw error;
+  }
 
   revalidatePath("/field/deliveries");
   revalidatePath("/internal/dispatch");
@@ -274,7 +309,7 @@ export async function markDeliveredAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect("/field/deliveries?success=delivered");
+  redirect(deliveryPageUrl("success", "delivered", orderId));
 }
 
 type LockedDeliveryOrder = {
@@ -350,9 +385,9 @@ function assertProofEligibleStatus(status: string) {
   }
 }
 
-function redirectFromProofError(error: unknown): never {
+function redirectFromProofError(error: unknown, orderId: string): never {
   if (error instanceof DeliveryProofActionError) {
-    redirect(`/field/deliveries?error=${encodeURIComponent(error.code)}`);
+    redirect(deliveryPageUrl("error", error.code, orderId));
   }
 
   throw error;
@@ -376,7 +411,7 @@ export async function requestManagerProofUploadAction(formData: FormData) {
   }
 
   if (requestNote.length > 500) {
-    redirect("/field/deliveries?error=proof-note-too-long");
+    redirect(deliveryPageUrl("error", "proof-note-too-long", orderId));
   }
 
   try {
@@ -452,7 +487,7 @@ export async function requestManagerProofUploadAction(formData: FormData) {
       });
     });
   } catch (error) {
-    redirectFromProofError(error);
+    redirectFromProofError(error, orderId);
   }
 
   await createSecurityAuditLog({
@@ -468,7 +503,7 @@ export async function requestManagerProofUploadAction(formData: FormData) {
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect("/field/deliveries?success=proof-help-requested");
+  redirect(deliveryPageUrl("success", "proof-help-requested", orderId));
 }
 
 export async function cancelManagerProofUploadRequestAction(
@@ -558,7 +593,7 @@ export async function cancelManagerProofUploadRequestAction(
       });
     });
   } catch (error) {
-    redirectFromProofError(error);
+    redirectFromProofError(error, orderId);
   }
 
   await createSecurityAuditLog({
@@ -574,7 +609,7 @@ export async function cancelManagerProofUploadRequestAction(
   revalidatePath("/account/tasks");
   revalidatePath("/internal/tasks");
 
-  redirect("/field/deliveries?success=proof-help-cancelled");
+  redirect(deliveryPageUrl("success", "proof-help-cancelled", orderId));
 }
 
 export async function uploadSignedInvoiceProofAction(formData: FormData) {
@@ -598,7 +633,13 @@ export async function uploadSignedInvoiceProofAction(formData: FormData) {
   const validatedProof = await readAndValidateDeliveryProof(file, note);
 
   if ("error" in validatedProof) {
-    redirect(`/field/deliveries?error=${validatedProof.error}`);
+    redirect(
+      deliveryPageUrl(
+        "error",
+        validatedProof.error || "invalid-proof-content",
+        orderId,
+      ),
+    );
   }
 
   let orderNumber = orderId;
@@ -750,7 +791,7 @@ export async function uploadSignedInvoiceProofAction(formData: FormData) {
       });
     });
   } catch (error) {
-    redirectFromProofError(error);
+    redirectFromProofError(error, orderId);
   }
 
   await createSecurityAuditLog({
@@ -774,5 +815,5 @@ export async function uploadSignedInvoiceProofAction(formData: FormData) {
   revalidatePath("/internal/tasks");
   revalidatePath("/internal/security");
 
-  redirect("/field/deliveries?success=proof-uploaded");
+  redirect(deliveryPageUrl("success", "proof-uploaded", orderId));
 }

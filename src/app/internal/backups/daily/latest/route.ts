@@ -1,14 +1,13 @@
 import { createReadStream, existsSync } from "node:fs";
-import path from "node:path";
 import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
 import { checkPermission } from "@/lib/auth-guards";
-import {
-  generateDailyBusinessArchive,
-  getDefaultArchiveDate,
-} from "@/lib/daily-business-archive";
+import { getDefaultArchiveDate } from "@/lib/daily-business-archive";
 import { prisma } from "@/lib/db";
-import { createSecurityAuditLog } from "@/lib/security-audit";
+import {
+  getDailyArchiveDirectory,
+  resolveStoredFile,
+} from "@/lib/runtime-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +31,7 @@ async function findArchive(businessDate: string) {
 }
 
 export async function GET() {
-  const { currentUser, hasAccess } = await checkPermission(
+  const { hasAccess } = await checkPermission(
     "manage_backups",
     "/internal/backups/daily/latest",
   );
@@ -44,48 +43,37 @@ export async function GET() {
   const businessDate = getDefaultArchiveDate();
 
   try {
-    let archive = await findArchive(businessDate);
-    let generatedNow = false;
-
-    if (!archive?.filePath || !existsSync(archive.filePath)) {
-      await generateDailyBusinessArchive(businessDate);
-      archive = await findArchive(businessDate);
-      generatedNow = true;
-    }
-
-    if (!archive?.filePath || !archive.fileName || !existsSync(archive.filePath)) {
+    const archive = await findArchive(businessDate);
+    if (!archive?.filePath || !archive.fileName) {
       return NextResponse.json(
-        { error: "Daily archive could not be generated." },
-        { status: 500 },
+        { error: "Latest daily archive has not been generated yet." },
+        { status: 404 },
       );
     }
 
-    const allowedRoot = path.resolve(
-      /* turbopackIgnore: true */ process.cwd(),
-      process.env.DAILY_ARCHIVE_DIR || "backups/daily-reports",
-    );
-    const resolved = path.resolve(archive.filePath);
-
-    if (
-      !resolved.startsWith(`${allowedRoot}${path.sep}`) &&
-      resolved !== allowedRoot
-    ) {
+    let resolved: string;
+    try {
+      resolved = resolveStoredFile(
+        getDailyArchiveDirectory(),
+        archive.filePath,
+      );
+    } catch {
       return NextResponse.json(
         { error: "Invalid archive path." },
         { status: 400 },
       );
     }
 
-    if (generatedNow) {
-      await createSecurityAuditLog({
-        eventType: "DAILY_ARCHIVE_GENERATED",
-        user: currentUser,
-        path: "/internal/backups/daily/latest",
-        description: `Automatically generated missing daily business archive ${archive.fileName} before download.`,
-      });
+    if (!existsSync(resolved)) {
+      return NextResponse.json(
+        { error: "Latest daily archive file was not found." },
+        { status: 404 },
+      );
     }
 
-    const stream = Readable.toWeb(createReadStream(resolved));
+    const stream = Readable.toWeb(
+      createReadStream(/* turbopackIgnore: true */ resolved),
+    );
     return new NextResponse(stream as BodyInit, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",

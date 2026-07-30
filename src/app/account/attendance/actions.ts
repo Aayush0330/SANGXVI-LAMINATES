@@ -30,6 +30,25 @@ const allowedActionTypes: AttendanceActionType[] = [
   "SMALL_BREAK_END",
   "PUNCH_OUT",
 ];
+const MAX_PHOTO_BYTES = 650 * 1024;
+const configuredMaxAccuracy = Number(
+  process.env.ATTENDANCE_MAX_ACCURACY_METERS || 150,
+);
+const MAX_ACCURACY_METERS =
+  Number.isFinite(configuredMaxAccuracy) && configuredMaxAccuracy > 0
+    ? configuredMaxAccuracy
+    : 150;
+
+type AttendanceWriteClient = Pick<
+  typeof prisma,
+  "$executeRaw" | "$queryRaw"
+>;
+
+class AttendanceStateError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+  }
+}
 
 function parseNumber(value: FormDataEntryValue | null) {
   if (value === null || String(value).trim() === "") {
@@ -49,7 +68,34 @@ function getSafeRedirectQuery(message: string) {
   return encodeURIComponent(message.slice(0, 160));
 }
 
+function parseJpegDataUrl(value: string) {
+  const prefix = "data:image/jpeg;base64,";
+  if (!value.startsWith(prefix)) return null;
+  const encoded = value.slice(prefix.length);
+  if (
+    !encoded ||
+    encoded.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
+  ) {
+    return null;
+  }
+
+  const bytes = Buffer.from(encoded, "base64");
+  if (
+    bytes.length < 4 ||
+    bytes.length > MAX_PHOTO_BYTES ||
+    bytes[0] !== 0xff ||
+    bytes[1] !== 0xd8 ||
+    bytes[2] !== 0xff
+  ) {
+    return null;
+  }
+
+  return `${prefix}${bytes.toString("base64")}`;
+}
+
 async function saveAttendanceAttempt({
+  client = prisma,
   userId,
   actionType,
   status,
@@ -61,6 +107,7 @@ async function saveAttendanceAttempt({
   insideGeofence,
   photoDataUrl,
 }: {
+  client?: AttendanceWriteClient;
   userId: string;
   actionType: AttendanceActionType;
   status: string;
@@ -72,7 +119,7 @@ async function saveAttendanceAttempt({
   insideGeofence: boolean;
   photoDataUrl: string | null;
 }) {
-  await prisma.$executeRaw`
+  await client.$executeRaw`
     INSERT INTO public."OfficeAttendanceAttempt" (
       "id",
       "userId",
@@ -105,6 +152,7 @@ async function saveAttendanceAttempt({
 }
 
 async function saveAttendanceEvent({
+  client = prisma,
   attendanceId,
   userId,
   actionType,
@@ -116,6 +164,7 @@ async function saveAttendanceEvent({
   photoDataUrl,
   note,
 }: {
+  client?: AttendanceWriteClient;
   attendanceId: string;
   userId: string;
   actionType: AttendanceActionType;
@@ -127,7 +176,7 @@ async function saveAttendanceEvent({
   photoDataUrl: string | null;
   note: string;
 }) {
-  await prisma.$executeRaw`
+  await client.$executeRaw`
     INSERT INTO public."OfficeAttendanceEvent" (
       "id",
       "attendanceId",
@@ -185,10 +234,9 @@ export async function submitAttendancePunchAction(formData: FormData) {
   const accuracyMeters = parseNumber(formData.get("accuracyMeters"));
   const rawPhotoDataUrl = String(formData.get("photoDataUrl") ?? "");
   const photoRequired = actionType === "PUNCH_IN";
-  const photoDataUrl =
-    photoRequired && rawPhotoDataUrl.startsWith("data:image/jpeg;base64,")
-      ? rawPhotoDataUrl
-      : null;
+  const photoDataUrl = photoRequired
+    ? parseJpegDataUrl(rawPhotoDataUrl)
+    : null;
 
   if (!allowedActionTypes.includes(actionType)) {
     redirect("/account/attendance?error=invalid-action");
@@ -203,15 +251,30 @@ export async function submitAttendancePunchAction(formData: FormData) {
   }
 
   if (photoRequired && !photoDataUrl) {
-    redirect("/account/attendance?error=photo-required");
-  }
-
-  if (photoDataUrl && photoDataUrl.length > 900000) {
-    redirect("/account/attendance?error=photo-too-large");
+    redirect(
+      rawPhotoDataUrl
+        ? "/account/attendance?error=invalid-photo-content"
+        : "/account/attendance?error=photo-required",
+    );
   }
 
   const office = await getActiveOfficeLocation();
   const geofenceRequired = currentUser.geofenceMode === "OFFICE_REQUIRED";
+
+  if (
+    accuracyMeters !== null &&
+    (accuracyMeters <= 0 || accuracyMeters > 10_000)
+  ) {
+    redirect("/account/attendance?error=invalid-location");
+  }
+  if (
+    geofenceRequired &&
+    (accuracyMeters === null || accuracyMeters > MAX_ACCURACY_METERS)
+  ) {
+    redirect(
+      `/account/attendance?error=inaccurate-location&maxAccuracy=${encodeURIComponent(String(MAX_ACCURACY_METERS))}`,
+    );
+  }
 
   if (
     geofenceRequired &&
@@ -277,8 +340,11 @@ export async function submitAttendancePunchAction(formData: FormData) {
     }
 
     const attendanceId = randomUUID();
+    const message = `Punch In approved. User was ${distanceMeters}m from office.`;
 
-    await prisma.$executeRaw`
+    try {
+      await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
       INSERT INTO public."OfficeAttendance" (
         "id",
         "userId",
@@ -311,35 +377,43 @@ export async function submitAttendancePunchAction(formData: FormData) {
         CURRENT_TIMESTAMP,
         CURRENT_TIMESTAMP
       )
-    `;
+      `;
 
-    const message = `Punch In approved. User was ${distanceMeters}m from office.`;
+      await saveAttendanceEvent({
+        client: tx,
+        attendanceId,
+        userId: currentUser.id,
+        actionType,
+        latitude,
+        longitude,
+        accuracyMeters,
+        distanceMeters,
+        insideGeofence,
+        photoDataUrl: null,
+        note: message,
+      });
 
-    await saveAttendanceEvent({
-      attendanceId,
-      userId: currentUser.id,
-      actionType,
-      latitude,
-      longitude,
-      accuracyMeters,
-      distanceMeters,
-      insideGeofence,
-      photoDataUrl,
-      note: message,
-    });
-
-    await saveAttendanceAttempt({
-      userId: currentUser.id,
-      actionType,
-      status: "APPROVED",
-      message,
-      latitude,
-      longitude,
-      accuracyMeters,
-      distanceMeters,
-      insideGeofence,
-      photoDataUrl,
-    });
+      await saveAttendanceAttempt({
+        client: tx,
+        userId: currentUser.id,
+        actionType,
+        status: "APPROVED",
+        message,
+        latitude,
+        longitude,
+        accuracyMeters,
+        distanceMeters,
+        insideGeofence,
+        photoDataUrl: null,
+      });
+      });
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      if (/unique|23505|OfficeAttendance_userId_workDate/i.test(text)) {
+        redirect("/account/attendance?error=already-punched-in");
+      }
+      throw error;
+    }
 
     await createSecurityAuditLog({
       eventType: "ATTENDANCE_PUNCH",
@@ -370,43 +444,60 @@ export async function submitAttendancePunchAction(formData: FormData) {
       redirect("/account/attendance?error=invalid-action");
     }
 
-    await prisma.$executeRaw`
-      UPDATE public."OfficeAttendance"
-      SET
-        "status" = ${getBreakStatusFromType(breakType)},
-        "currentBreakType" = ${breakType},
-        "currentBreakStartedAt" = CURRENT_TIMESTAMP,
-        "updatedAt" = CURRENT_TIMESTAMP
-      WHERE "id" = ${todayAttendance.id}
-    `;
-
     const message = `${getBreakTypeLabel(breakType)} started. User was ${distanceMeters}m from office.`;
 
-    await saveAttendanceEvent({
-      attendanceId: todayAttendance.id,
-      userId: currentUser.id,
-      actionType,
-      latitude,
-      longitude,
-      accuracyMeters,
-      distanceMeters,
-      insideGeofence,
-      photoDataUrl,
-      note: message,
-    });
+    try {
+      await prisma.$transaction(async (tx) => {
+        const changed = await tx.$queryRaw<Array<{ id: string }>>`
+          UPDATE public."OfficeAttendance"
+          SET
+            "status" = ${getBreakStatusFromType(breakType)},
+            "currentBreakType" = ${breakType},
+            "currentBreakStartedAt" = CURRENT_TIMESTAMP,
+            "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = ${todayAttendance.id}
+            AND "punchOutAt" IS NULL
+            AND "currentBreakType" IS NULL
+          RETURNING "id"
+        `;
+        if (changed.length !== 1) {
+          throw new AttendanceStateError("end-current-break-first");
+        }
 
-    await saveAttendanceAttempt({
-      userId: currentUser.id,
-      actionType,
-      status: "APPROVED",
-      message,
-      latitude,
-      longitude,
-      accuracyMeters,
-      distanceMeters,
-      insideGeofence,
-      photoDataUrl,
-    });
+        await saveAttendanceEvent({
+          client: tx,
+          attendanceId: todayAttendance.id,
+          userId: currentUser.id,
+          actionType,
+          latitude,
+          longitude,
+          accuracyMeters,
+          distanceMeters,
+          insideGeofence,
+          photoDataUrl: null,
+          note: message,
+        });
+
+        await saveAttendanceAttempt({
+          client: tx,
+          userId: currentUser.id,
+          actionType,
+          status: "APPROVED",
+          message,
+          latitude,
+          longitude,
+          accuracyMeters,
+          distanceMeters,
+          insideGeofence,
+          photoDataUrl: null,
+        });
+      });
+    } catch (error) {
+      if (error instanceof AttendanceStateError) {
+        redirect(`/account/attendance?error=${error.code}`);
+      }
+      throw error;
+    }
 
     await createSecurityAuditLog({
       eventType: "ATTENDANCE_BREAK",
@@ -425,44 +516,62 @@ export async function submitAttendancePunchAction(formData: FormData) {
       redirect("/account/attendance?error=invalid-break-end");
     }
 
-    await prisma.$executeRaw`
-      UPDATE public."OfficeAttendance"
-      SET
-        "status" = 'PUNCHED_IN',
-        "breakMinutes" = "breakMinutes" + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "currentBreakStartedAt")) / 60)::int),
-        "currentBreakType" = NULL,
-        "currentBreakStartedAt" = NULL,
-        "updatedAt" = CURRENT_TIMESTAMP
-      WHERE "id" = ${todayAttendance.id}
-    `;
-
     const message = `${getBreakTypeLabel(breakType)} ended. User was ${distanceMeters}m from office.`;
 
-    await saveAttendanceEvent({
-      attendanceId: todayAttendance.id,
-      userId: currentUser.id,
-      actionType,
-      latitude,
-      longitude,
-      accuracyMeters,
-      distanceMeters,
-      insideGeofence,
-      photoDataUrl,
-      note: message,
-    });
+    try {
+      await prisma.$transaction(async (tx) => {
+        const changed = await tx.$queryRaw<Array<{ id: string }>>`
+          UPDATE public."OfficeAttendance"
+          SET
+            "status" = 'PUNCHED_IN',
+            "breakMinutes" = "breakMinutes" + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "currentBreakStartedAt")) / 60)::int),
+            "currentBreakType" = NULL,
+            "currentBreakStartedAt" = NULL,
+            "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = ${todayAttendance.id}
+            AND "punchOutAt" IS NULL
+            AND "currentBreakType" = ${breakType}
+            AND "currentBreakStartedAt" IS NOT NULL
+          RETURNING "id"
+        `;
+        if (changed.length !== 1) {
+          throw new AttendanceStateError("invalid-break-end");
+        }
 
-    await saveAttendanceAttempt({
-      userId: currentUser.id,
-      actionType,
-      status: "APPROVED",
-      message,
-      latitude,
-      longitude,
-      accuracyMeters,
-      distanceMeters,
-      insideGeofence,
-      photoDataUrl,
-    });
+        await saveAttendanceEvent({
+          client: tx,
+          attendanceId: todayAttendance.id,
+          userId: currentUser.id,
+          actionType,
+          latitude,
+          longitude,
+          accuracyMeters,
+          distanceMeters,
+          insideGeofence,
+          photoDataUrl: null,
+          note: message,
+        });
+
+        await saveAttendanceAttempt({
+          client: tx,
+          userId: currentUser.id,
+          actionType,
+          status: "APPROVED",
+          message,
+          latitude,
+          longitude,
+          accuracyMeters,
+          distanceMeters,
+          insideGeofence,
+          photoDataUrl: null,
+        });
+      });
+    } catch (error) {
+      if (error instanceof AttendanceStateError) {
+        redirect(`/account/attendance?error=${error.code}`);
+      }
+      throw error;
+    }
 
     await createSecurityAuditLog({
       eventType: "ATTENDANCE_BREAK",
@@ -482,50 +591,68 @@ export async function submitAttendancePunchAction(formData: FormData) {
     redirect("/account/attendance?error=end-current-break-first");
   }
 
-  await prisma.$executeRaw`
-    UPDATE public."OfficeAttendance"
-    SET
-      "status" = 'COMPLETED',
-      "punchOutAt" = CURRENT_TIMESTAMP,
-      "punchOutLatitude" = ${latitude},
-      "punchOutLongitude" = ${longitude},
-      "punchOutAccuracyMeters" = ${accuracyMeters},
-      "punchOutDistanceMeters" = ${distanceMeters},
-      "punchOutInsideGeofence" = ${insideGeofence},
-      "punchOutPhotoDataUrl" = ${photoDataUrl},
-      "totalMinutes" = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "punchInAt")) / 60)::int),
-      "netWorkingMinutes" = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "punchInAt")) / 60)::int - "breakMinutes"),
-      "updatedAt" = CURRENT_TIMESTAMP
-    WHERE "id" = ${todayAttendance.id}
-  `;
-
   const message = `Logging Out / Punch Out saved. User was ${distanceMeters}m from office.`;
 
-  await saveAttendanceEvent({
-    attendanceId: todayAttendance.id,
-    userId: currentUser.id,
-    actionType,
-    latitude,
-    longitude,
-    accuracyMeters,
-    distanceMeters,
-    insideGeofence,
-    photoDataUrl,
-    note: message,
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.$queryRaw<Array<{ id: string }>>`
+        UPDATE public."OfficeAttendance"
+        SET
+          "status" = 'COMPLETED',
+          "punchOutAt" = CURRENT_TIMESTAMP,
+          "punchOutLatitude" = ${latitude},
+          "punchOutLongitude" = ${longitude},
+          "punchOutAccuracyMeters" = ${accuracyMeters},
+          "punchOutDistanceMeters" = ${distanceMeters},
+          "punchOutInsideGeofence" = ${insideGeofence},
+          "punchOutPhotoDataUrl" = NULL,
+          "totalMinutes" = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "punchInAt")) / 60)::int),
+          "netWorkingMinutes" = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "punchInAt")) / 60)::int - "breakMinutes"),
+          "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = ${todayAttendance.id}
+          AND "punchInAt" IS NOT NULL
+          AND "punchOutAt" IS NULL
+          AND "currentBreakType" IS NULL
+        RETURNING "id"
+      `;
+      if (changed.length !== 1) {
+        throw new AttendanceStateError("already-completed");
+      }
 
-  await saveAttendanceAttempt({
-    userId: currentUser.id,
-    actionType,
-    status: "APPROVED",
-    message,
-    latitude,
-    longitude,
-    accuracyMeters,
-    distanceMeters,
-    insideGeofence,
-    photoDataUrl,
-  });
+      await saveAttendanceEvent({
+        client: tx,
+        attendanceId: todayAttendance.id,
+        userId: currentUser.id,
+        actionType,
+        latitude,
+        longitude,
+        accuracyMeters,
+        distanceMeters,
+        insideGeofence,
+        photoDataUrl: null,
+        note: message,
+      });
+
+      await saveAttendanceAttempt({
+        client: tx,
+        userId: currentUser.id,
+        actionType,
+        status: "APPROVED",
+        message,
+        latitude,
+        longitude,
+        accuracyMeters,
+        distanceMeters,
+        insideGeofence,
+        photoDataUrl: null,
+      });
+    });
+  } catch (error) {
+    if (error instanceof AttendanceStateError) {
+      redirect(`/account/attendance?error=${error.code}`);
+    }
+    throw error;
+  }
 
   await createSecurityAuditLog({
     eventType: "ATTENDANCE_PUNCH",

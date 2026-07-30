@@ -101,7 +101,7 @@ function AssignmentChoice({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-2xl border p-4 text-left transition ${
+      className={`min-w-0 overflow-hidden whitespace-normal rounded-2xl border p-4 text-left transition ${
         active
           ? "border-blue-500 bg-blue-50 shadow-sm ring-4 ring-blue-500/10 dark:bg-blue-500/10"
           : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
@@ -117,7 +117,9 @@ function AssignmentChoice({
         {icon}
       </span>
       <span className="mt-3 block text-sm font-black text-slate-950 dark:text-white">{title}</span>
-      <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{helper}</span>
+      <span className="mt-1 block max-w-full break-words text-xs leading-5 text-slate-500 dark:text-slate-400">
+        {helper}
+      </span>
     </button>
   );
 }
@@ -231,7 +233,7 @@ export function TaskCreateDrawer({
                         key={option.value}
                         type="button"
                         onClick={() => setPurpose(option.value)}
-                        className={`rounded-2xl border p-4 text-left transition ${
+                        className={`min-w-0 overflow-hidden whitespace-normal rounded-2xl border p-4 text-left transition ${
                           active
                             ? `${option.tone} ring-4 ring-blue-500/10`
                             : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
@@ -239,7 +241,9 @@ export function TaskCreateDrawer({
                       >
                         <span className="text-xl font-black">{option.icon}</span>
                         <span className="ml-3 text-sm font-black">{option.title}</span>
-                        <span className="mt-2 block text-xs leading-5 opacity-75">{option.helper}</span>
+                        <span className="mt-2 block max-w-full break-words text-xs leading-5 opacity-75">
+                          {option.helper}
+                        </span>
                       </button>
                     );
                   })}

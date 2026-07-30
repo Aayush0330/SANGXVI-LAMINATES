@@ -7,7 +7,20 @@ import { createDatabaseBackup } from "@/lib/backup-runtime";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+function isSameOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  const fetchSite = request.headers.get("sec-fetch-site");
+  return (
+    origin === new URL(request.url).origin &&
+    fetchSite !== "cross-site"
+  );
+}
+
+export async function POST(request: Request) {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  }
+
   const { currentUser, hasAccess } = await checkPermission(
     "manage_backups",
     "/internal/backups/download",
@@ -26,7 +39,9 @@ export async function GET() {
       triggeredById: currentUser.id,
       triggeredBy: currentUser.name,
     });
-    const stream = Readable.toWeb(createReadStream(backup.filePath));
+    const stream = Readable.toWeb(
+      createReadStream(/* turbopackIgnore: true */ backup.filePath),
+    );
 
     return new NextResponse(stream as BodyInit, {
       status: 200,
@@ -49,4 +64,11 @@ export async function GET() {
       { status: 500 },
     );
   }
+}
+
+export function GET() {
+  return NextResponse.json(
+    { error: "Use POST to generate a new backup." },
+    { status: 405, headers: { Allow: "POST" } },
+  );
 }

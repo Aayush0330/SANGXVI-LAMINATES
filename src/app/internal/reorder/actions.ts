@@ -183,14 +183,8 @@ export async function approvePurchaseRequestAction(formData: FormData) {
   const estimatedTotal = approved.reduce((sum, item) => sum + item.lineTotal, 0);
 
   await prisma.$transaction(async (tx) => {
-    for (const item of approved) {
-      await tx.purchaseRequestItem.update({
-        where: { id: item.id },
-        data: { approvedQuantity: item.quantity, lineTotal: new Prisma.Decimal(item.lineTotal.toFixed(2)) },
-      });
-    }
-    await tx.purchaseRequest.update({
-      where: { id: request.id },
+    const claimed = await tx.purchaseRequest.updateMany({
+      where: { id: request.id, status: "SUBMITTED" },
       data: {
         status: "APPROVED",
         approvedById: currentUser.id,
@@ -203,6 +197,16 @@ export async function approvePurchaseRequestAction(formData: FormData) {
         estimatedTotal: new Prisma.Decimal(estimatedTotal.toFixed(2)),
       },
     });
+    if (claimed.count !== 1) {
+      go("invalid-approval-state", "error", request.id);
+    }
+
+    for (const item of approved) {
+      await tx.purchaseRequestItem.update({
+        where: { id: item.id },
+        data: { approvedQuantity: item.quantity, lineTotal: new Prisma.Decimal(item.lineTotal.toFixed(2)) },
+      });
+    }
     await createWorkflowNotification({
       client: tx,
       title: "Purchase request approved",
@@ -234,10 +238,13 @@ export async function rejectPurchaseRequestAction(formData: FormData) {
   if (request.status !== "SUBMITTED") go("invalid-approval-state", "error", request.id);
 
   await prisma.$transaction(async (tx) => {
-    await tx.purchaseRequest.update({
-      where: { id: request.id },
+    const claimed = await tx.purchaseRequest.updateMany({
+      where: { id: request.id, status: "SUBMITTED" },
       data: { status: "REJECTED", rejectedById: currentUser.id, rejectedByName: currentUser.name, rejectedAt: new Date(), rejectionReason: reason },
     });
+    if (claimed.count !== 1) {
+      go("invalid-approval-state", "error", request.id);
+    }
     await createWorkflowNotification({
       client: tx,
       title: "Purchase request rejected",
@@ -271,11 +278,8 @@ export async function markPurchaseOrderedAction(formData: FormData) {
   if (duplicatePo) go("duplicate-po-number", "error", request.id);
 
   await prisma.$transaction(async (tx) => {
-    for (const item of request.items) {
-      await tx.purchaseRequestItem.update({ where: { id: item.id }, data: { orderedQuantity: item.approvedQuantity } });
-    }
-    await tx.purchaseRequest.update({
-      where: { id: request.id },
+    const claimed = await tx.purchaseRequest.updateMany({
+      where: { id: request.id, status: "APPROVED" },
       data: {
         status: "ORDERED",
         purchaseOrderNumber,
@@ -285,6 +289,13 @@ export async function markPurchaseOrderedAction(formData: FormData) {
         expectedDeliveryDate,
       },
     });
+    if (claimed.count !== 1) {
+      go("invalid-order-state", "error", request.id);
+    }
+
+    for (const item of request.items) {
+      await tx.purchaseRequestItem.update({ where: { id: item.id }, data: { orderedQuantity: item.approvedQuantity } });
+    }
     await createWorkflowNotification({
       client: tx,
       title: "Purchase ordered",
@@ -311,10 +322,13 @@ export async function markPurchaseInTransitAction(formData: FormData) {
   if (request.status !== "ORDERED") go("invalid-transit-state", "error", request.id);
 
   await prisma.$transaction(async (tx) => {
-    await tx.purchaseRequest.update({
-      where: { id: request.id },
+    const claimed = await tx.purchaseRequest.updateMany({
+      where: { id: request.id, status: "ORDERED" },
       data: { status: "IN_TRANSIT", inTransitAt: new Date(), supplierInvoiceNumber: optionalText(formData.get("supplierInvoiceNumber"), 120) },
     });
+    if (claimed.count !== 1) {
+      go("invalid-transit-state", "error", request.id);
+    }
     await createWorkflowNotification({
       client: tx,
       title: "Purchase in transit",
@@ -345,8 +359,11 @@ export async function cancelPurchaseRequestAction(formData: FormData) {
   if (request.items.some((item) => item.receivedQuantity + item.damagedQuantity + item.rejectedQuantity > 0)) go("cannot-cancel-received-purchase", "error", request.id);
 
   await prisma.$transaction(async (tx) => {
-    await tx.purchaseRequest.update({
-      where: { id: request.id },
+    const claimed = await tx.purchaseRequest.updateMany({
+      where: {
+        id: request.id,
+        status: { in: ["SUBMITTED", "APPROVED", "ORDERED", "IN_TRANSIT"] },
+      },
       data: {
         status: "CANCELLED",
         cancelledById: currentUser.id,
@@ -355,6 +372,24 @@ export async function cancelPurchaseRequestAction(formData: FormData) {
         cancellationReason: reason,
       },
     });
+    if (claimed.count !== 1) {
+      go("invalid-cancel-state", "error", request.id);
+    }
+
+    const handledItem = await tx.purchaseRequestItem.findFirst({
+      where: {
+        purchaseRequestId: request.id,
+        OR: [
+          { receivedQuantity: { gt: 0 } },
+          { damagedQuantity: { gt: 0 } },
+          { rejectedQuantity: { gt: 0 } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (handledItem) {
+      go("cannot-cancel-received-purchase", "error", request.id);
+    }
     await createWorkflowNotification({
       client: tx,
       title: "Purchase request cancelled",

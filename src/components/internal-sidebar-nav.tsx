@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 import type { NavigationItem } from "@/lib/navigation";
 
 type SidebarSection = {
@@ -258,11 +259,11 @@ function getSidebarLabel(item: NavigationItem, financeMode: boolean) {
     case "/internal/order-receiving":
       return "Order Receiving";
     case "/internal/dispatch":
-      return "Inventory & Dispatch";
+      return "Physical Checks";
     case "/internal/field-visits":
       return "Field Reports";
     case "/internal/qc":
-      return "Quality Control";
+      return "QC & Delivery";
     case "/internal/users/dealer-members":
       return "Dealer Access";
     case "/internal/security":
@@ -284,6 +285,8 @@ export function InternalSidebarNav({
   financeMode?: boolean;
 }) {
   const pathname = usePathname();
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const activeItemRef = useRef<HTMLAnchorElement>(null);
   const sections = items.reduce<SidebarSection[]>((accumulator, item) => {
     const heading = getSidebarHeading(item, financeMode);
     const existingSection = accumulator.find(
@@ -299,6 +302,31 @@ export function InternalSidebarNav({
     return accumulator;
   }, []);
 
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    const activeItem = activeItemRef.current;
+
+    if (!scrollContainer || !activeItem) return;
+
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+    const itemIsVisible =
+      itemRect.top >= containerRect.top && itemRect.bottom <= containerRect.bottom;
+
+    if (itemIsVisible) return;
+
+    const centeredScrollTop =
+      scrollContainer.scrollTop +
+      itemRect.top -
+      containerRect.top -
+      (scrollContainer.clientHeight - activeItem.offsetHeight) / 2;
+
+    scrollContainer.scrollTo({
+      top: Math.max(0, centeredScrollTop),
+      behavior: "smooth",
+    });
+  }, [pathname]);
+
   function renderItem(item: NavigationItem) {
     const active = isActivePath(pathname, item.href);
     const displayLabel = getSidebarLabel(item, financeMode);
@@ -306,19 +334,22 @@ export function InternalSidebarNav({
     return (
       <Link
         key={item.href}
+        ref={active ? activeItemRef : undefined}
         href={item.href}
-        className={`group flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
+        title={displayLabel}
+        aria-current={active ? "page" : undefined}
+        className={`group flex min-h-11 items-center justify-between gap-3 rounded-xl px-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
           active
-            ? "bg-[#eef2ff] text-blue-600 shadow-sm shadow-blue-100/70 dark:bg-blue-500/15 dark:text-blue-200 dark:shadow-none"
-            : "text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+            ? "bg-blue-600 text-white shadow-[0_8px_24px_rgba(37,99,235,0.28)]"
+            : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-white"
         }`}
       >
         <span className="flex min-w-0 items-center gap-3">
           <span
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
               active
-                ? "bg-white text-blue-600 dark:bg-blue-500/20 dark:text-blue-200"
-                : "text-slate-500 group-hover:text-slate-900 dark:text-slate-500 dark:group-hover:text-white"
+                ? "bg-white/15 text-white"
+                : "text-slate-400 group-hover:bg-white group-hover:text-slate-700 dark:text-slate-500 dark:group-hover:bg-white/5 dark:group-hover:text-slate-200"
             }`}
           >
             <NavIcon label={item.label} />
@@ -327,7 +358,12 @@ export function InternalSidebarNav({
         </span>
 
         <span
-          className={`text-lg leading-none ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}
+          className={`text-lg leading-none transition ${
+            active
+              ? "opacity-100"
+              : "translate-x-[-2px] opacity-0 group-hover:translate-x-0 group-hover:opacity-60"
+          }`}
+          aria-hidden="true"
         >
           ›
         </span>
@@ -336,8 +372,14 @@ export function InternalSidebarNav({
   }
 
   return (
-    <nav className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-5">
+    <nav
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+      aria-label="Internal ERP navigation"
+    >
+      <div
+        ref={scrollContainerRef}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-5 pr-2 [scrollbar-gutter:stable] [scrollbar-width:thin]"
+      >
         <div className="space-y-6">
           {sections.map((section, index) => (
             <div
@@ -348,10 +390,12 @@ export function InternalSidebarNav({
                   : "border-t border-slate-200 pt-5 dark:border-white/10"
               }
             >
-              <p className="mb-3 px-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+              <p className="mb-3 px-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-600">
                 {section.heading}
               </p>
-              <div className="space-y-1.5">{section.items.map(renderItem)}</div>
+              <div className="space-y-1.5">
+                {section.items.map(renderItem)}
+              </div>
             </div>
           ))}
         </div>

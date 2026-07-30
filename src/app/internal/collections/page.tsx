@@ -105,13 +105,26 @@ async function getData() {
     prisma.user.findMany({
       where: {
         status: "ACTIVE",
-        role: { in: collectionAssignableRoles },
+        OR: [
+          { role: { in: collectionAssignableRoles } },
+          {
+            roleAssignments: {
+              some: { role: { in: collectionAssignableRoles } },
+            },
+          },
+        ],
       },
       select: { id: true, name: true, role: true },
       orderBy: [{ role: "asc" }, { name: "asc" }],
     }),
     prisma.user.findMany({
-      where: { status: "ACTIVE", role: "DEALER" },
+      where: {
+        status: "ACTIVE",
+        OR: [
+          { role: "DEALER" },
+          { roleAssignments: { some: { role: "DEALER" } } },
+        ],
+      },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     }),

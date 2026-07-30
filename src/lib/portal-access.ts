@@ -18,8 +18,6 @@ const portalRolePriority: Record<PortalType, readonly UserRole[]> = {
     "order_team",
     "qc_team",
     "dispatch_team",
-    "sales_field_team",
-    "collection_team",
   ],
   field: ["driver_transport", "collection_team", "sales_field_team"],
   dealer: ["dealer"],

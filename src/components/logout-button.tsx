@@ -5,16 +5,24 @@ import { logoutAction } from "@/app/logout/actions";
 export function LogoutButton({
   variant = "default",
 }: {
-  variant?: "default" | "compact";
+  variant?: "default" | "compact" | "sidebar";
 }) {
   const buttonClass =
     variant === "compact"
       ? "group inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow-sm shadow-slate-200/70 transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:gap-2 sm:px-5 sm:py-3 sm:text-sm"
+      : variant === "sidebar"
+        ? "group inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:border-white/10 dark:bg-white/8 dark:text-slate-300 dark:hover:border-white/15 dark:hover:bg-white/12 dark:hover:text-white"
       : "group flex w-full items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-sm shadow-slate-200/70 transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100";
 
   return (
-    <form action={logoutAction} className={variant === "compact" ? "" : "w-full"}>
-      <button type="submit" className={buttonClass}>
+    <form
+      action={logoutAction}
+      className={variant === "compact" ? "" : "w-full"}
+    >
+      <button
+        type="submit"
+        className={buttonClass}
+      >
         <svg
           className="h-3.5 w-3.5 transition group-hover:translate-x-0.5 sm:h-4 sm:w-4"
           viewBox="0 0 20 20"

@@ -8,7 +8,6 @@ import { hasPermission, roleLabels, type UserRole } from "@/lib/permissions";
 import {
   formatTaskDate,
   getCalendarStatusLabel,
-  getTaskGoogleCalendarUrl,
   getTaskModuleLabel,
   getWorkflowTaskHref,
   getTaskTypeLabel,
@@ -19,8 +18,6 @@ import {
 } from "@/lib/work-tasks";
 import {
   addWorkTaskComment,
-  markWorkTaskCalendarSynced,
-  syncWorkTaskGoogleCalendar,
   updateWorkTaskStatus,
 } from "@/app/internal/tasks/actions";
 
@@ -214,32 +211,10 @@ function TaskItem({ task }: { task: MyTask }) {
     (subtask) => subtask.status !== "DONE" && subtask.status !== "CANCELLED",
   ).length;
 
-  const teamName = `${task.team.parentTeam ? `${task.team.parentTeam.name} → ` : ""}${task.team.name}`;
-
-  const calendarUrl = getTaskGoogleCalendarUrl({
-    title: task.title,
-    taskNumber: task.taskNumber,
-    dueAt: task.dueAt,
-    calendarReminderAt: task.calendarReminderAt,
-    calendarNotes: task.calendarNotes,
-    teamName,
-    assigneeName: task.assignee?.name ?? null,
-    priority: task.priority,
-    status: task.status,
-    taskType: task.taskType,
-    relatedModule: task.relatedModule,
-    relatedReference: task.relatedReference,
-    description: task.description,
-  });
-
-
   const workflowHref = getWorkflowTaskHref({
     relatedModule: task.relatedModule,
     orderId: task.orderId,
   });
-
-  const calendarSetupRequired =
-    task.googleSyncError?.includes("Google Calendar is not configured") ?? false;
 
   const showSyncedAt =
     task.calendarStatus === "SYNCED" &&
@@ -395,61 +370,25 @@ function TaskItem({ task }: { task: MyTask }) {
         </p>
       ) : null}
 
-      {calendarUrl ? (
-        <div className="mt-5 grid gap-2">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <form action={syncWorkTaskGoogleCalendar}>
-              <input type="hidden" name="taskId" value={task.id} />
-              <input type="hidden" name="returnTo" value="/account/tasks" />
-
-              <button className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-300 dark:hover:bg-emerald-400/20">
-                Sync Google Calendar
-              </button>
-            </form>
-
-            <a
-              href={calendarUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-center text-sm font-black text-cyan-700 transition hover:bg-cyan-100 dark:border-cyan-400/30 dark:bg-cyan-400/10 dark:text-cyan-300 dark:hover:bg-cyan-400/20"
-            >
-              Open Calendar Draft
-            </a>
-          </div>
-
-          <form action={markWorkTaskCalendarSynced}>
-            <input type="hidden" name="taskId" value={task.id} />
-            <input type="hidden" name="returnTo" value="/account/tasks" />
-
-            <button className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900">
-              Mark Manual Calendar Synced
-            </button>
-          </form>
-
+      {task.dueAt ? (
+        <div className="mt-5">
           {task.googleSyncError ? (
-            <p
-              className={`rounded-2xl border px-4 py-3 text-xs font-bold leading-5 ${
-                calendarSetupRequired
-                  ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200"
-                  : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-300"
-              }`}
-            >
-              {calendarSetupRequired
-                ? "Google Calendar integration is not connected yet. Add Google credentials in .env, then use Sync Google Calendar. Until then, use Open Calendar Draft."
-                : `Google sync error: ${task.googleSyncError}`}
+            <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold leading-5 text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-300">
+              Automatic Calendar sync is retrying in the background.
             </p>
-          ) : null}
-
-          {showSyncedAt ? (
+          ) : showSyncedAt ? (
             <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-300">
-              Synced at {formatTaskDate(task.calendarSyncedAt)}
+              Google Calendar automatically synced at {formatTaskDate(task.calendarSyncedAt)}
             </p>
-          ) : null}
+          ) : (
+            <p className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-xs font-bold text-cyan-700 dark:border-cyan-400/20 dark:bg-cyan-500/10 dark:text-cyan-300">
+              Google Calendar sync is automatic after the shared account is connected.
+            </p>
+          )}
         </div>
       ) : (
         <p className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-3 text-xs font-bold leading-5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          Ask manager to add a due date before syncing this task with Google
-          Calendar.
+          Ask the manager to add a due date before this task can appear in Google Calendar.
         </p>
       )}
 

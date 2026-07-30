@@ -42,7 +42,7 @@ export default function RootLayout({
     >
       <head>
         <InlineScript
-          html={`(function(){try{var key='sangxvi-theme';var saved=localStorage.getItem(key);var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var theme=saved|| (prefersDark ? 'dark' : 'light');document.documentElement.classList.toggle('dark', theme==='dark');document.documentElement.style.colorScheme=theme;}catch(e){}})();`}
+          html={`(function(){try{var key='sanghvi-theme';var legacyKey='sangxvi-theme';var saved=localStorage.getItem(key)||localStorage.getItem(legacyKey);if(saved&&localStorage.getItem(legacyKey)){localStorage.setItem(key,saved);localStorage.removeItem(legacyKey);}var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var theme=saved||(prefersDark?'dark':'light');document.documentElement.classList.toggle('dark',theme==='dark');document.documentElement.style.colorScheme=theme;}catch(e){}})();`}
         />
       </head>
       <body className="flex min-h-full flex-col">

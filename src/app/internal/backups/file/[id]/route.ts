@@ -1,9 +1,12 @@
 import { createReadStream, existsSync } from "node:fs";
-import path from "node:path";
 import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
+import {
+  getBackupDirectory,
+  resolveStoredFile,
+} from "@/lib/runtime-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,17 +36,23 @@ export async function GET(
     LIMIT 1
   `;
   const backup = rows[0];
-  if (!backup?.filePath || !backup.fileName || !existsSync(backup.filePath)) {
+  if (!backup?.filePath || !backup.fileName) {
     return NextResponse.json({ error: "Backup file not found." }, { status: 404 });
   }
 
-  const allowedRoot = path.resolve(/* turbopackIgnore: true */ process.cwd(), process.env.BACKUP_DIR || "backups/database");
-  const resolved = path.resolve(backup.filePath);
-  if (!resolved.startsWith(`${allowedRoot}${path.sep}`) && resolved !== allowedRoot) {
+  let resolved: string;
+  try {
+    resolved = resolveStoredFile(getBackupDirectory(), backup.filePath);
+  } catch {
     return NextResponse.json({ error: "Invalid backup path." }, { status: 400 });
   }
+  if (!existsSync(resolved)) {
+    return NextResponse.json({ error: "Backup file not found." }, { status: 404 });
+  }
 
-  const stream = Readable.toWeb(createReadStream(resolved));
+  const stream = Readable.toWeb(
+    createReadStream(/* turbopackIgnore: true */ resolved),
+  );
   return new NextResponse(stream as BodyInit, {
     headers: {
       "Content-Type": "application/gzip",

@@ -6,6 +6,7 @@ import { ProductStatus } from "@/generated/prisma/client";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { hasExpectedDeliveryProofSignature } from "@/lib/delivery-proof";
+import { createSecurityAuditLog } from "@/lib/security-audit";
 
 function getProductStatus(quantity: number, minimumStock: number) {
   if (quantity <= 0) return ProductStatus.OUT_OF_STOCK;
@@ -287,7 +288,7 @@ export async function updateProductAction(formData: FormData) {
 }
 
 export async function updateStockAction(formData: FormData) {
-  await requireInventoryAccess();
+  const currentUser = await requireInventoryAccess();
 
   const productId = cleanText(formData.get("productId"), 80);
   const movementType = cleanText(formData.get("movementType"), 20);
@@ -299,29 +300,70 @@ export async function updateStockAction(formData: FormData) {
   if (!["ADD", "REDUCE"].includes(movementType)) go("invalid-stock-action");
   if (!Number.isInteger(quantityChange) || quantityChange <= 0) go("invalid-stock-quantity");
 
-  const product = await prisma.product.findUnique({ where: { id: productId } });
-  if (!product) go("product-not-found");
-  if (!product.isActive) go("archived-product-stock");
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM public."Product"
+      WHERE "id" = ${productId}
+      FOR UPDATE
+    `;
+    const product = await tx.product.findUnique({ where: { id: productId } });
+    if (!product) go("product-not-found");
+    if (!product.isActive) go("archived-product-stock");
 
-  const nextQuantity = movementType === "ADD" ? product.quantity + quantityChange : product.quantity - quantityChange;
-  if (nextQuantity < 0) go("insufficient-stock");
+    const nextQuantity =
+      movementType === "ADD"
+        ? product.quantity + quantityChange
+        : product.quantity - quantityChange;
+    if (nextQuantity < 0) go("insufficient-stock");
 
-  const nextMinimumStock = minimumStockInput === "" ? product.minimumStock : Number(minimumStockInput);
-  const nextMaximumStock = maximumStockInput === "" ? product.maximumStock : Number(maximumStockInput);
+    const nextMinimumStock =
+      minimumStockInput === ""
+        ? product.minimumStock
+        : Number(minimumStockInput);
+    const nextMaximumStock =
+      maximumStockInput === ""
+        ? product.maximumStock
+        : Number(maximumStockInput);
 
-  if (!Number.isInteger(nextMinimumStock) || nextMinimumStock < 0) go("invalid-minimum-stock");
-  if (!Number.isInteger(nextMaximumStock) || nextMaximumStock <= 0) go("invalid-maximum-stock");
-  if (nextMaximumStock < nextMinimumStock) go("maximum-below-minimum");
-  if (nextQuantity + product.blocked > nextMaximumStock) go("stock-above-maximum");
+    if (!Number.isInteger(nextMinimumStock) || nextMinimumStock < 0) {
+      go("invalid-minimum-stock");
+    }
+    if (!Number.isInteger(nextMaximumStock) || nextMaximumStock <= 0) {
+      go("invalid-maximum-stock");
+    }
+    if (nextMaximumStock < nextMinimumStock) go("maximum-below-minimum");
+    if (nextQuantity + product.blocked > nextMaximumStock) {
+      go("stock-above-maximum");
+    }
 
-  await prisma.product.update({
-    where: { id: product.id },
-    data: {
-      quantity: nextQuantity,
-      minimumStock: nextMinimumStock,
-      maximumStock: nextMaximumStock,
-      status: getProductStatus(nextQuantity, nextMinimumStock),
-    },
+    return tx.product.update({
+      where: { id: product.id },
+      data: {
+        quantity: nextQuantity,
+        minimumStock: nextMinimumStock,
+        maximumStock: nextMaximumStock,
+        status: getProductStatus(nextQuantity, nextMinimumStock),
+      },
+      select: {
+        code: true,
+        name: true,
+        quantity: true,
+        blocked: true,
+        minimumStock: true,
+        maximumStock: true,
+      },
+    });
+  });
+
+  await createSecurityAuditLog({
+    eventType: "INVENTORY_STOCK_UPDATED",
+    user: currentUser,
+    path: "/internal/inventory",
+    description:
+      `${movementType} ${quantityChange} units for ${updated.code} (${updated.name}). ` +
+      `Available: ${updated.quantity}; blocked: ${updated.blocked}; ` +
+      `minimum: ${updated.minimumStock}; maximum: ${updated.maximumStock}.`,
   });
 
   revalidateProductPaths();

@@ -31,6 +31,246 @@ function runMigrations() {
   });
 }
 
+async function expectConstraintRejection(
+  client: Client,
+  label: string,
+  text: string,
+  values: unknown[] = [],
+) {
+  try {
+    await client.query(text, values);
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "23514"
+    ) {
+      return;
+    }
+    throw new Error(
+      `${label} failed for an unexpected reason: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  throw new Error(`${label} was accepted, but the database should reject it.`);
+}
+
+async function verifyProductionIntegrity(client: Client) {
+  const marker = Date.now().toString(36);
+  const dealerId = `integrity_dealer_${marker}`;
+  const categoryId = `integrity_category_${marker}`;
+  const brandId = `integrity_brand_${marker}`;
+  const productId = `integrity_product_${marker}`;
+  const deliveryOrderId = `integrity_delivery_order_${marker}`;
+  const cancelOrderId = `integrity_cancel_order_${marker}`;
+  const incompleteOrderId = `integrity_incomplete_order_${marker}`;
+  const deliveryItemId = `integrity_delivery_item_${marker}`;
+  const cancelItemId = `integrity_cancel_item_${marker}`;
+  const incompleteItemId = `integrity_incomplete_item_${marker}`;
+  const supplierId = `integrity_supplier_${marker}`;
+  const purchaseId = `integrity_purchase_${marker}`;
+  const collectionId = `integrity_collection_${marker}`;
+  const purchaseItemId = `integrity_purchase_item_${marker}`;
+
+  await client.query(`
+    INSERT INTO public."User" (
+      "id","name","email","role","status","geofenceMode",
+      "mustChangePassword","createdAt","updatedAt"
+    ) VALUES (
+      '${dealerId}','Integrity Dealer','integrity-dealer-${marker}@example.com',
+      'DEALER','ACTIVE','OFFICE_REQUIRED',FALSE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    );
+
+    INSERT INTO public."ProductCategory" (
+      "id","name","isActive","createdAt","updatedAt"
+    ) VALUES (
+      '${categoryId}','Integrity Category ${marker}',TRUE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    );
+
+    INSERT INTO public."ProductBrand" (
+      "id","name","isActive","createdAt","updatedAt"
+    ) VALUES (
+      '${brandId}','Integrity Brand ${marker}',TRUE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    );
+
+    INSERT INTO public."Product" (
+      "id","code","name","categoryId","brandId","stack","unit",
+      "quantity","blocked","minimumStock","maximumStock","status","isActive",
+      "gstRate","createdAt","updatedAt"
+    ) VALUES (
+      '${productId}','INT-${marker}','Integrity Product',
+      '${categoryId}','${brandId}','T1','Sheets',
+      20,0,2,40,'AVAILABLE',TRUE,18,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    );
+
+    INSERT INTO public."Order" (
+      "id","orderNumber","dealerId","status","source","priority",
+      "signedInvoiceStatus","deliveryProofAssistanceStatus","createdAt","updatedAt"
+    ) VALUES
+      (
+        '${deliveryOrderId}','INT-DELIVERY-${marker}','${dealerId}',
+        'NEW_ORDER','DEALER_PORTAL','NORMAL','NOT_UPLOADED','NOT_REQUESTED',
+        CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      ),
+      (
+        '${cancelOrderId}','INT-CANCEL-${marker}','${dealerId}',
+        'NEW_ORDER','DEALER_PORTAL','NORMAL','NOT_UPLOADED','NOT_REQUESTED',
+        CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      ),
+      (
+        '${incompleteOrderId}','INT-INCOMPLETE-${marker}','${dealerId}',
+        'NEW_ORDER','DEALER_PORTAL','NORMAL','NOT_UPLOADED','NOT_REQUESTED',
+        CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      );
+
+    INSERT INTO public."OrderItem" (
+      "id","orderId","productId","requestedQuantity","quantity",
+      "blockedQuantity","deliveredQuantity","cancelledQuantity",
+      "unitPrice","gstRate","lineSubtotal","taxAmount","lineTotal","priceSource",
+      "createdAt","updatedAt"
+    ) VALUES
+      (
+        '${deliveryItemId}','${deliveryOrderId}','${productId}',
+        2,2,0,0,0,100,18,200,36,236,'DEALER_PRICE',
+        CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      ),
+      (
+        '${cancelItemId}','${cancelOrderId}','${productId}',
+        2,2,0,0,0,100,18,200,36,236,'DEALER_PRICE',
+        CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      ),
+      (
+        '${incompleteItemId}','${incompleteOrderId}','${productId}',
+        2,2,0,0,0,100,18,200,36,236,'DEALER_PRICE',
+        CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      );
+
+    INSERT INTO public."Supplier" (
+      "id","code","companyName","isActive","defaultLeadTimeDays",
+      "createdAt","updatedAt"
+    ) VALUES (
+      '${supplierId}','INT-SUP-${marker}','Integrity Supplier',TRUE,0,
+      CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    );
+
+    INSERT INTO public."PurchaseRequest" (
+      "id","requestNumber","supplierId","status","priority","estimatedTotal",
+      "createdAt","updatedAt"
+    ) VALUES (
+      '${purchaseId}','INT-PR-${marker}','${supplierId}','SUBMITTED',
+      'NORMAL',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    );
+  `);
+
+  await expectConstraintRejection(
+    client,
+    "Partial stock reservation",
+    `UPDATE public."OrderItem"
+     SET "blockedQuantity"=1
+     WHERE "id"='${deliveryItemId}'`,
+  );
+
+  await expectConstraintRejection(
+    client,
+    "Premature delivered order",
+    `UPDATE public."Order"
+     SET "status"='DELIVERED'
+     WHERE "id"='${incompleteOrderId}'`,
+  );
+
+  await client.query(`
+    UPDATE public."OrderItem"
+    SET "blockedQuantity"=2
+    WHERE "id"='${deliveryItemId}';
+
+    UPDATE public."OrderItem"
+    SET "blockedQuantity"=0,"deliveredQuantity"=2
+    WHERE "id"='${deliveryItemId}';
+
+    UPDATE public."Order"
+    SET "status"='DELIVERED'
+    WHERE "id"='${deliveryOrderId}';
+  `);
+
+  await expectConstraintRejection(
+    client,
+    "Delivered order resurrection",
+    `UPDATE public."Order"
+     SET "status"='NEW_ORDER'
+     WHERE "id"='${deliveryOrderId}'`,
+  );
+
+  await expectConstraintRejection(
+    client,
+    "Delivered item mutation",
+    `UPDATE public."OrderItem"
+     SET "deliveredQuantity"=0
+     WHERE "id"='${deliveryItemId}'`,
+  );
+
+  await expectConstraintRejection(
+    client,
+    "Delivered item deletion",
+    `DELETE FROM public."OrderItem"
+     WHERE "id"='${deliveryItemId}'`,
+  );
+
+  await client.query(`
+    UPDATE public."OrderItem"
+    SET "cancelledQuantity"=2
+    WHERE "id"='${cancelItemId}';
+
+    UPDATE public."Order"
+    SET "status"='CANCELLED'
+    WHERE "id"='${cancelOrderId}';
+  `);
+
+  await expectConstraintRejection(
+    client,
+    "Cancelled order resurrection",
+    `UPDATE public."Order"
+     SET "status"='NEW_ORDER'
+     WHERE "id"='${cancelOrderId}'`,
+  );
+
+  await expectConstraintRejection(
+    client,
+    "Negative product stock",
+    `UPDATE public."Product"
+     SET "quantity"=-1
+     WHERE "id"='${productId}'`,
+  );
+
+  await expectConstraintRejection(
+    client,
+    "Collection overpayment",
+    `INSERT INTO public."CollectionAssignment" (
+       "id","collectionNumber","dealerName","amountToCollect","amountCollected",
+       "paymentMode","status","createdAt","updatedAt"
+     ) VALUES (
+       '${collectionId}','INT-COL-${marker}','Integrity Dealer',100,101,
+       'CASH','ASSIGNED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+     )`,
+  );
+
+  await expectConstraintRejection(
+    client,
+    "Invalid purchase quantity progression",
+    `INSERT INTO public."PurchaseRequestItem" (
+       "id","purchaseRequestId","productId","requestedQuantity",
+       "approvedQuantity","orderedQuantity","receivedQuantity",
+       "damagedQuantity","rejectedQuantity","estimatedUnitPrice","lineTotal",
+       "createdAt","updatedAt"
+     ) VALUES (
+       '${purchaseItemId}','${purchaseId}','${productId}',
+       5,6,0,0,0,0,0,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+     )`,
+  );
+}
+
 async function main() {
   const admin = new Client({ connectionString: sourceUrl });
   await admin.connect();
@@ -50,7 +290,10 @@ async function main() {
       const migrations = Number(migrationResult.rows[0]?.count ?? 0);
       const tables = Number(tableResult.rows[0]?.count ?? 0);
       if (migrations < 1 || tables < 2) throw new Error("Fresh database schema verification failed.");
-      console.log(`Fresh database migration verification passed: ${migrations} migrations, ${tables} tables.`);
+      await verifyProductionIntegrity(fresh);
+      console.log(
+        `Fresh database migration verification passed: ${migrations} migrations, ${tables} tables, 9 integrity rejection checks.`,
+      );
     } finally {
       await fresh.end();
     }

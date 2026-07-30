@@ -262,21 +262,21 @@ export default async function OrderJourneyPage({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-6 text-white shadow-xl sm:p-8">
+      <section className="rounded-[2rem] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50 p-6 text-slate-950 shadow-sm shadow-slate-200/70 sm:p-8 dark:border-white/10 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 dark:text-white dark:shadow-none">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.3em] text-cyan-300">
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-blue-600 dark:text-cyan-300">
               Supervisor Audit
             </p>
             <h1 className="mt-3 text-3xl font-black sm:text-5xl">Order Journey</h1>
-            <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
+            <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300">
               One operational record showing the responsible stage, movement time,
               problems, decisions, QC, transport, delivery and evidence.
             </p>
           </div>
           <Link
             href={exportHref}
-            className="w-fit rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+            className="w-fit rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-700 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200"
           >
             Export Audit CSV
           </Link>
@@ -287,8 +287,8 @@ export default async function OrderJourneyPage({
             ["Active workflow", activeCount],
             ["Need attention", attentionCount],
           ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs font-bold text-slate-400">{label}</p>
+            <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</p>
               <p className="mt-2 text-3xl font-black">{value}</p>
             </div>
           ))}

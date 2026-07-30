@@ -10,6 +10,7 @@ import {
   saveDealerCartAction,
   type DealerCartSnapshotItem,
 } from "./cart-actions";
+import { orderPaymentTagOptions } from "@/lib/order-payment";
 
 type PriceSource = "DEALER_PRICE" | "SELLING_PRICE" | "MANUAL_PRICE" | "LEGACY_BACKFILL";
 
@@ -374,9 +375,9 @@ export function DealerOrderBuilder({
       <aside className="xl:sticky xl:top-[96px] xl:self-start">
         <form action={createDealerOrderAction} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-xl shadow-slate-900/5 dark:border-white/10 dark:bg-[#0d182a]">
           <input type="hidden" name="cartVersion" value={version} />
-          <div className="border-b border-slate-200 bg-gradient-to-br from-slate-950 to-blue-950 p-5 text-white dark:border-white/10">
-            <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-blue-200">Saved order cart</p><h2 className="mt-1 text-xl font-black">{cart.length} products</h2></div><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10"><Icon name="cart" /></div></div>
-            <div className="mt-3 flex items-center justify-between gap-3"><p className="text-xs font-semibold text-blue-100">{totalUnits} total units selected</p>{cart.length > 0 ? <button type="button" onClick={() => setCart([])} className="text-[10px] font-black uppercase tracking-[0.12em] text-blue-200 hover:text-white">Clear cart</button> : null}</div>
+          <div className="border-b border-slate-200 bg-gradient-to-br from-white to-blue-50 p-5 text-slate-950 dark:border-white/10 dark:from-slate-950 dark:to-blue-950 dark:text-white">
+            <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600 dark:text-blue-200">Saved order cart</p><h2 className="mt-1 text-xl font-black">{cart.length} products</h2></div><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-white/10 dark:text-white"><Icon name="cart" /></div></div>
+            <div className="mt-3 flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-600 dark:text-blue-100">{totalUnits} total units selected</p>{cart.length > 0 ? <button type="button" onClick={() => setCart([])} className="text-[10px] font-black uppercase tracking-[0.12em] text-blue-600 hover:text-blue-700 dark:text-blue-200 dark:hover:text-white">Clear cart</button> : null}</div>
           </div>
 
           <div className="max-h-[430px] overflow-y-auto p-4">
@@ -408,6 +409,23 @@ export function DealerOrderBuilder({
           </div>
 
           <div className="border-t border-slate-200 p-4 dark:border-white/10">
+            <label className="block text-xs font-black text-slate-700 dark:text-slate-300">
+              Payment type
+            </label>
+            <select
+              name="paymentTag"
+              defaultValue="NORMAL_PAYMENT"
+              className="mt-2 h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold outline-none focus:border-blue-400 dark:border-white/10 dark:bg-white/5"
+            >
+              {orderPaymentTagOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-[10px] font-semibold leading-4 text-slate-400">
+              This label will appear in the shared Google Calendar order timeline.
+            </p>
             <label className="block text-xs font-black text-slate-700 dark:text-slate-300">Order note</label>
             <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} maxLength={1000} placeholder="Delivery preference or special instructions" className="mt-2 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold outline-none focus:border-blue-400 dark:border-white/10 dark:bg-white/5" />
             <div className="mt-4 space-y-2 text-xs font-semibold">

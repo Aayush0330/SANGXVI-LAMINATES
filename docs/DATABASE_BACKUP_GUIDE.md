@@ -1,93 +1,104 @@
-# Database backup and restore
+# Database backup and restore runbook
 
-## Download a backup from the ERP UI
+## Production requirements
 
-Open **Internal → Backups** and click **Generate & Download Backup**.
+The application creates compressed PostgreSQL dumps with SHA-256 manifests.
+Production requires:
 
-The web download is production-safe for normal hosted deployments:
+- `pg_dump` and `psql` compatible with the PostgreSQL server;
+- an absolute `BACKUP_DIR` on a durable, private, encrypted volume;
+- an absolute `DAILY_ARCHIVE_DIR` on the same class of storage;
+- a unique `CRON_SECRET`;
+- a separate 24+ character `RESTORE_CONFIRMATION_TOKEN`;
+- a managed PostgreSQL backup/PITR policy and an independent offsite copy.
 
-- it generates a fresh `.sql.gz` export at request time;
-- it sends the file directly to the browser;
-- it does not read from or write permanent files in `backups/database`;
-- it deletes the temporary runtime file after preparing the response.
+The application rejects temporary storage such as `/tmp` in production. A
+serverless function filesystem is not durable storage. If the deployment has no
+persistent private mount, run exports from a controlled worker/server and rely
+on the database provider’s PITR capability.
 
-For production, set `BACKUP_DATABASE_URL` to the hosted PostgreSQL connection
-string. If `BACKUP_DATABASE_URL` is not set, the route falls back to
-`DATABASE_URL`.
+Example:
 
-The hosting runtime must have `pg_dump` available. If it is not available, use
-a Docker/server deployment that includes PostgreSQL client tools, or use your
-database provider's managed backup/export feature.
+```env
+BACKUP_DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
+BACKUP_DIR="/var/lib/sanghvi-erp/database-backups"
+DAILY_ARCHIVE_DIR="/var/lib/sanghvi-erp/daily-archives"
+BACKUP_RETENTION_DAYS="30"
+PSQL_PATH="psql"
+CRON_SECRET="<unique-random-secret>"
+RESTORE_CONFIRMATION_TOKEN="<different-unique-random-secret>"
+```
 
-## Create a local/scheduled CLI backup
+Directories and generated backup/manifest files are created with private Unix
+permissions. Volume-level encryption and access controls remain deployment
+responsibilities.
+
+## Create a backup
+
+From the ERP, an owner can open **Internal → Backups** and submit
+**Generate & Download Backup**. Generation is a same-origin authenticated
+`POST`; a plain `GET` cannot create a backup.
+
+From the server CLI:
 
 ```bash
 npm run db:backup
 ```
 
-CLI backups are written to `backups/database` as compressed `.sql.gz` files.
-This folder is for local use or scheduled server jobs only; the ERP web
-download page does not list or depend on it.
-The command checks the database connection first. When `DATABASE_URL` points
-to localhost and the database is stopped, it starts the configured Prisma Dev
-instance automatically. Data is dumped as SQL `INSERT` statements because the
-local Prisma Dev database does not reliably support `pg_dump`'s default
-`COPY ... TO stdout` mode. Prisma Dev's internal WAL schema is excluded from
-the archive. When the configured database is the default Prisma Dev TCP port$
-(`51214`), a running instance is briefly restarted before backup to clear
-proxy session state and make repeated backups reliable.
-
-Local defaults:
-
-```env
-DATABASE_URL="postgresql://postgres:postgres@localhost:51214/template1?sslmode=disable"
-PRISMA_DEV_NAME="default"
-BACKUP_DIR="backups/database"
-BACKUP_RETENTION_DAYS="30"
-PG_DUMP_PATH="pg_dump"
-PSQL_PATH="psql"
-```
-
-`pg_dump` and `psql` must be installed. On macOS with Homebrew:
+Scheduled:
 
 ```bash
-brew install libpq
-brew link --force libpq
+npm run db:backup:auto
 ```
+
+The protected `/api/cron/backup` endpoint can also run this operation. Send
+`Authorization: Bearer <CRON_SECRET>`. The included schedule is every four
+hours, but it is usable only on a runtime with durable storage.
+
+Only one dump can run at a time; a PostgreSQL advisory lock rejects overlapping
+jobs. Database credentials are passed to `pg_dump` through the process
+environment, not command-line arguments.
 
 ## Verify a backup
 
-```bash
-gzip -t backups/database/sanghvi-erp-<timestamp>.sql.gz
-```
-
-Successful and failed attempts are recorded in
-`backups/database/backup-log.jsonl`.
-
-## Restore a backup
-
-Restore replaces database objects and data. Confirm the target
-`DATABASE_URL` before running:
+Use the application verifier so both gzip integrity and the SHA-256 manifest are
+checked:
 
 ```bash
-npm run db:restore -- backups/database/sanghvi-erp-<timestamp>.sql.gz --yes
+npm run db:backup:verify -- /absolute/path/to/sanghvi-erp-automatic-<timestamp>.sql.gz
 ```
 
-The `--yes` flag is required because restore is destructive.
+Also run a scheduled restore drill into an isolated non-production database.
+Successful dump creation alone does not prove recoverability.
 
-## Local Prisma Dev note
+## Restore
 
-Prisma Dev's local Postgres proxy can sometimes keep a stale prepared statement
-session for `pg_dump`, causing an error like:
+Restore replaces database objects and data. Validate the target URL and keep a
+separate copy of the selected backup.
 
-```txt
-prepared statement "dumpenumtype" already exists
+Local/non-production:
+
+```bash
+npm run db:restore -- /absolute/path/to/backup.sql.gz --yes
 ```
 
-The ERP download route handles this only for local databases by restarting the
-configured Prisma Dev instance once and retrying the dump. Set
-`PRISMA_DEV_NAME` if your local instance name is not `default`.
+Production requires all three safeguards:
 
-Daily database backup system has been added.
-The system can generate compressed PostgreSQL backup files using npm run db:backup.
-On server, the hosting team can schedule the same command daily using cron.
+```bash
+npm run db:restore -- /absolute/path/to/backup.sql.gz \
+  --yes \
+  --production \
+  --confirm-token='<exact RESTORE_CONFIRMATION_TOKEN>'
+```
+
+By default, the command verifies the manifest and creates a pre-restore safety
+backup. `--allow-unverified` and `--skip-restore-point` are emergency controls;
+use either only after documented human review.
+
+## Operational checklist
+
+- Alert on a missed four-hour backup window or any failed `BackupRecord`.
+- Copy successful backups to a second account/region with retention controls.
+- Rotate database and cron credentials on an established schedule.
+- Test restore into an isolated database at least monthly.
+- Record recovery time and recovery point achieved during each drill.

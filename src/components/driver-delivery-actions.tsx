@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import {
   cancelManagerProofUploadRequestAction,
@@ -8,6 +9,7 @@ import {
   requestManagerProofUploadAction,
   uploadSignedInvoiceProofAction,
 } from "@/app/field/deliveries/actions";
+import { ErpIcon } from "@/components/erp-icon";
 
 export const DRIVER_DELIVERY_SCROLL_KEY =
   "sangxvi:driver-delivery-scroll-position";
@@ -36,6 +38,7 @@ function PendingButton({
 
   return (
     <button
+      type="submit"
       disabled={pending}
       className={`${className} disabled:cursor-wait disabled:opacity-60`}
     >
@@ -49,9 +52,9 @@ export function MarkOnTheWayForm({ orderId }: { orderId: string }) {
     <form action={markOnTheWayAction} onSubmit={preserveScroll}>
       <input type="hidden" name="orderId" value={orderId} />
       <PendingButton
-        idleLabel="Start Delivery"
-        pendingLabel="Starting…"
-        className="min-h-14 w-full rounded-2xl bg-orange-600 px-6 py-3 text-base font-black text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700 sm:w-auto"
+        idleLabel="Start Route"
+        pendingLabel="Starting Route…"
+        className="min-h-12 w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 sm:w-auto"
       />
     </form>
   );
@@ -59,12 +62,26 @@ export function MarkOnTheWayForm({ orderId }: { orderId: string }) {
 
 export function MarkDeliveredForm({ orderId }: { orderId: string }) {
   return (
-    <form action={markDeliveredAction} onSubmit={preserveScroll}>
+    <form
+      action={markDeliveredAction}
+      onSubmit={(event) => {
+        const confirmed = window.confirm(
+          "Confirm that the complete order quantity was delivered to the dealer. This will consume all reserved stock for this order.",
+        );
+
+        if (!confirmed) {
+          event.preventDefault();
+          return;
+        }
+
+        preserveScroll();
+      }}
+    >
       <input type="hidden" name="orderId" value={orderId} />
       <PendingButton
-        idleLabel="Delivery Completed"
-        pendingLabel="Saving…"
-        className="min-h-14 w-full rounded-2xl bg-emerald-600 px-6 py-3 text-base font-black text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 sm:w-auto"
+        idleLabel="Confirm Complete Delivery"
+        pendingLabel="Completing Delivery…"
+        className="min-h-12 w-full rounded-xl bg-emerald-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 sm:w-auto"
       />
     </form>
   );
@@ -77,41 +94,71 @@ export function DriverProofOptions({
   orderId: string;
   assistanceRequested: boolean;
 }) {
-  return (
-    <div className="mt-5 grid gap-4 xl:grid-cols-2">
-      <details className="group rounded-[22px] border border-blue-200 bg-white p-5 open:ring-4 open:ring-blue-500/10 dark:border-blue-400/30 dark:bg-slate-950/80 dark:open:ring-blue-400/10">
-        <summary className="cursor-pointer list-none">
-          <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-blue-50 text-2xl dark:bg-blue-500/15">
-              📷
-            </div>
-            <div>
-              <p className="text-base font-black text-slate-950 dark:text-white">
-                Upload Proof Myself
-              </p>
-              <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-300">
-                Take a rear-camera photo or choose a saved image/PDF.
-              </p>
-            </div>
-          </div>
-        </summary>
+  const [mode, setMode] = useState<"self" | "manager">(
+    assistanceRequested ? "manager" : "self",
+  );
 
+  return (
+    <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200 bg-white dark:border-white/10 dark:bg-slate-950/70">
+      <div
+        className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 p-1.5 dark:border-white/10 dark:bg-white/[0.035]"
+        role="group"
+        aria-label="Delivery proof upload options"
+      >
+        <button
+          type="button"
+          onClick={() => setMode("self")}
+          aria-pressed={mode === "self"}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-xs font-black transition ${
+            mode === "self"
+              ? "bg-white text-blue-700 shadow-sm dark:bg-blue-600 dark:text-white"
+              : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+          }`}
+        >
+          <ErpIcon name="quality" className="h-4 w-4" />
+          Upload Myself
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("manager")}
+          aria-pressed={mode === "manager"}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-xs font-black transition ${
+            mode === "manager"
+              ? "bg-white text-violet-700 shadow-sm dark:bg-violet-600 dark:text-white"
+              : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+          }`}
+        >
+          <ErpIcon name="users" className="h-4 w-4" />
+          Manager Help
+        </button>
+      </div>
+
+      {mode === "self" ? (
         <form
           action={uploadSignedInvoiceProofAction}
           onSubmit={preserveScroll}
-          className="mt-5 grid gap-3"
+          className="grid gap-4 p-4 sm:p-5"
         >
+          <div>
+            <h4 className="font-black text-slate-950 dark:text-white">
+              Upload signed duplicate invoice
+            </h4>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+              Use the rear camera or choose an existing image/PDF. A successful
+              self-upload automatically closes any pending manager request.
+            </p>
+          </div>
           <input type="hidden" name="orderId" value={orderId} />
           <label>
-            <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-              Proof File
+            <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              Signed Proof File
             </span>
             <input
               name="signedInvoice"
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
               capture="environment"
-              className="mt-2 block w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 file:mr-4 file:rounded-xl file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-xs file:font-black file:text-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:file:bg-blue-500"
+              className="mt-2 block w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-xs file:font-black file:text-white dark:border-white/10 dark:bg-slate-900 dark:text-slate-200 dark:file:bg-blue-500"
               required
             />
             <span className="mt-1.5 block text-[10px] font-semibold text-slate-400">
@@ -119,84 +166,91 @@ export function DriverProofOptions({
             </span>
           </label>
           <label>
-            <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-              Note
+            <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              Proof Note
             </span>
             <input
               name="note"
               maxLength={500}
-              placeholder="Signed by dealer / receiver"
-              className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-blue-400"
+              placeholder="Signed by dealer or receiver"
+              className="mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-slate-900 dark:text-white"
             />
           </label>
           <PendingButton
-            idleLabel="Upload Delivery Proof"
-            pendingLabel="Uploading…"
-            className="h-12 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700"
+            idleLabel="Upload & Complete Record"
+            pendingLabel="Uploading Proof…"
+            className="h-12 w-full rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 sm:w-fit"
           />
         </form>
-      </details>
-
-      <div className="rounded-[22px] border border-violet-200 bg-violet-50/50 p-5 dark:border-violet-400/25 dark:bg-violet-950/25">
-        <div className="flex items-start gap-4">
-          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-violet-100 text-2xl dark:bg-violet-500/15">
-            🙋
-          </div>
+      ) : (
+        <div className="p-4 sm:p-5">
           <div>
-            <p className="text-base font-black text-slate-950 dark:text-white">
-              Ask Manager to Upload
-            </p>
-            <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-300">
-              Use this when you sent the proof photo to your manager.
+            <h4 className="font-black text-slate-950 dark:text-white">
+              Request a manager upload
+            </h4>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+              Use this only after sending the signed proof file to an authorized
+              manager. The delivery record will still show you as the person who
+              delivered it.
             </p>
           </div>
-        </div>
 
-        {assistanceRequested ? (
-          <div className="mt-5 rounded-2xl border border-violet-200 bg-white px-4 py-4 text-sm font-black text-violet-700 dark:border-violet-400/30 dark:bg-slate-950/80 dark:text-violet-300">
-            Request sent to Manager ✓
-            <p className="mt-1 text-xs font-medium leading-5 text-slate-500 dark:text-slate-400">
-              You can still upload the proof yourself. A successful self-upload closes this manager request automatically.
-            </p>
+          {assistanceRequested ? (
+            <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-400/25 dark:bg-violet-500/10">
+              <div className="flex items-start gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
+                  <ErpIcon name="quality" className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-sm font-black text-violet-800 dark:text-violet-200">
+                    Manager request is active
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    You can still switch to self-upload. The manager task closes
+                    automatically when your proof is accepted.
+                  </p>
+                </div>
+              </div>
+              <form
+                action={cancelManagerProofUploadRequestAction}
+                onSubmit={preserveScroll}
+                className="mt-4"
+              >
+                <input type="hidden" name="orderId" value={orderId} />
+                <PendingButton
+                  idleLabel="Cancel Manager Request"
+                  pendingLabel="Cancelling Request…"
+                  className="h-10 w-full rounded-xl border border-violet-200 bg-white px-4 text-xs font-black text-violet-700 transition hover:bg-violet-100 dark:border-violet-400/30 dark:bg-slate-950 dark:text-violet-300"
+                />
+              </form>
+            </div>
+          ) : (
             <form
-              action={cancelManagerProofUploadRequestAction}
+              action={requestManagerProofUploadAction}
               onSubmit={preserveScroll}
-              className="mt-3"
+              className="mt-4 grid gap-3"
             >
               <input type="hidden" name="orderId" value={orderId} />
+              <label>
+                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                  Message for Manager
+                </span>
+                <input
+                  name="requestNote"
+                  maxLength={500}
+                  placeholder="Proof photo sent directly to the manager"
+                  className="mt-2 h-12 w-full rounded-xl border border-violet-200 bg-white px-4 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-violet-400/30 dark:bg-slate-900 dark:text-white"
+                />
+              </label>
               <PendingButton
-                idleLabel="Cancel Manager Request"
-                pendingLabel="Cancelling…"
-                className="h-10 w-full rounded-xl border border-violet-200 bg-white px-4 text-xs font-black text-violet-700 transition hover:bg-violet-50 dark:border-violet-400/30 dark:bg-slate-950 dark:text-violet-300 dark:hover:bg-violet-500/10"
+                idleLabel="Send Manager Request"
+                pendingLabel="Sending Request…"
+                className="h-12 w-full rounded-xl bg-violet-600 px-5 text-sm font-black text-white transition hover:bg-violet-700 sm:w-fit"
               />
             </form>
-          </div>
-        ) : (
-          <form
-            action={requestManagerProofUploadAction}
-            onSubmit={preserveScroll}
-            className="mt-5"
-          >
-            <input type="hidden" name="orderId" value={orderId} />
-            <label>
-              <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Optional Note
-              </span>
-              <input
-                name="requestNote"
-                maxLength={500}
-                placeholder="Photo sent directly to the manager"
-                className="mt-2 h-12 w-full rounded-2xl border border-violet-200 bg-white px-4 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 focus:border-violet-500 dark:border-violet-400/30 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-violet-400"
-              />
-            </label>
-            <PendingButton
-              idleLabel="Send Request to Manager"
-              pendingLabel="Sending…"
-              className="mt-3 h-12 w-full rounded-2xl bg-violet-600 px-5 text-sm font-black text-white transition hover:bg-violet-700"
-            />
-          </form>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

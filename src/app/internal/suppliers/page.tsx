@@ -85,7 +85,7 @@ export default async function SuppliersPage({
             <p className="text-xs font-black uppercase tracking-[0.34em] text-cyan-600 dark:text-cyan-300">Phase 6 · Procurement</p>
             <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-950 dark:text-white md:text-5xl">Supplier Directory</h1>
             <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
-              Supplier profiles, product mappings, purchase history and archive-safe vendor records. No WhatsApp integration is used.
+              Supplier profiles, product mappings, purchase history and archive-safe vendor records. Supplier messaging automation is not enabled in this phase.
             </p>
           </div>
           <Link href="/internal/reorder" className="rounded-2xl bg-slate-950 px-5 py-3 text-center text-sm font-black text-white dark:bg-white dark:text-slate-950">

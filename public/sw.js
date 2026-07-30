@@ -46,7 +46,11 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const href = event.notification.data?.href || "/";
-  const targetUrl = new URL(href, self.location.origin).href;
+  const candidateUrl = new URL(href, self.location.origin);
+  const targetUrl =
+    candidateUrl.origin === self.location.origin
+      ? candidateUrl.href
+      : `${self.location.origin}/`;
 
   event.waitUntil(
     clients

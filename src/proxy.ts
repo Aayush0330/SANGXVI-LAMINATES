@@ -1,8 +1,61 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
   FORCE_PASSWORD_CHANGE_COOKIE_NAME,
+  SESSION_MAX_AGE_SECONDS,
   SESSION_COOKIE_NAME,
 } from "@/lib/session-constants";
+
+function requestUsesHttps(request: NextRequest) {
+  const forwardedProtocol = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim()
+    .toLowerCase();
+
+  return forwardedProtocol
+    ? forwardedProtocol === "https"
+    : request.nextUrl.protocol === "https:";
+}
+
+function refreshPersistentCookies(request: NextRequest) {
+  const response = NextResponse.next();
+  const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME);
+  const expires = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
+
+  if (sessionCookie) {
+    response.cookies.set(SESSION_COOKIE_NAME, sessionCookie.value, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: requestUsesHttps(request),
+      expires,
+      maxAge: SESSION_MAX_AGE_SECONDS,
+      priority: "high",
+    });
+  }
+
+  const forcePasswordChangeCookie = request.cookies.get(
+    FORCE_PASSWORD_CHANGE_COOKIE_NAME,
+  );
+
+  if (forcePasswordChangeCookie) {
+    response.cookies.set(
+      FORCE_PASSWORD_CHANGE_COOKIE_NAME,
+      forcePasswordChangeCookie.value,
+      {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: requestUsesHttps(request),
+        expires,
+        maxAge: SESSION_MAX_AGE_SECONDS,
+        priority: "high",
+      },
+    );
+  }
+
+  return response;
+}
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -42,7 +95,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(changePasswordUrl);
   }
 
-  return NextResponse.next();
+  return refreshPersistentCookies(request);
 }
 
 export const config = {

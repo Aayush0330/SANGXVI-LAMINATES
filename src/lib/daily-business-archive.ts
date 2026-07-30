@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Client } from "pg";
+import { getDailyArchiveDirectory } from "@/lib/runtime-storage";
 
 function connectionString() {
   const value = process.env.DATABASE_URL;
@@ -333,16 +334,29 @@ export async function generateDailyBusinessArchive(businessDate: string) {
       ${purchaseSections || '<div class="card">No supplier purchase activity was recorded for this date.</div>'}
       </body></html>`;
 
-    const targetDir = path.resolve(/* turbopackIgnore: true */ process.cwd(), process.env.DAILY_ARCHIVE_DIR || "backups/daily-reports");
-    await fs.mkdir(targetDir, { recursive: true });
+    const targetDir = getDailyArchiveDirectory();
+    await fs.mkdir(/* turbopackIgnore: true */ targetDir, {
+      recursive: true,
+      mode: 0o700,
+    });
     const fileName = `sanghvi-daily-${businessDate}.html`;
-    const filePath = path.join(targetDir, fileName);
-    const jsonPath = path.join(targetDir, `sanghvi-daily-${businessDate}.json`);
-    await fs.writeFile(filePath, html, "utf8");
+    const filePath = path.join(
+      /* turbopackIgnore: true */ targetDir,
+      fileName,
+    );
+    const jsonPath = path.join(
+      /* turbopackIgnore: true */ targetDir,
+      `sanghvi-daily-${businessDate}.json`,
+    );
     await fs.writeFile(
-      jsonPath,
+      /* turbopackIgnore: true */ filePath,
+      html,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    await fs.writeFile(
+      /* turbopackIgnore: true */ jsonPath,
       JSON.stringify({ summary, orders, items, assignments, proofs, purchases, purchaseItems, purchaseReceipts }, null, 2),
-      "utf8",
+      { encoding: "utf8", mode: 0o600 },
     );
     const sha256 = createHash("sha256").update(html).digest("hex");
 

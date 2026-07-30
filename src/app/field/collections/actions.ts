@@ -54,16 +54,18 @@ function getPaymentMode(value: string): CollectionPaymentMode {
   return CollectionPaymentMode.CASH;
 }
 
-function isInternalCollectionRole(role: string) {
-  return role === "owner" || role === "manager" || role === "accountant";
+function hasInternalCollectionRole(roles: readonly string[]) {
+  return roles.some(
+    (role) => role === "owner" || role === "manager" || role === "accountant",
+  );
 }
 
 function canAccessCollection(
   assignedToId: string | null,
   currentUserId: string,
-  role: string
+  roles: readonly string[],
 ) {
-  return assignedToId === currentUserId || isInternalCollectionRole(role);
+  return assignedToId === currentUserId || hasInternalCollectionRole(roles);
 }
 
 function hasExpectedSignature(bytes: Uint8Array, mimeType: string) {
@@ -156,7 +158,7 @@ export async function updateCollectionProgressAction(formData: FormData) {
     !canAccessCollection(
       collection.assignedToId,
       currentUser.id,
-      currentUser.role
+      currentUser.roles,
     )
   ) {
     redirect("/field/collections?error=permission-denied");
@@ -211,9 +213,44 @@ export async function updateCollectionProgressAction(formData: FormData) {
     redirect("/field/collections?error=invalid-status");
   }
 
-  const updated = await prisma.collectionAssignment.update({
-    where: { id: collection.id },
-    data,
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM public."CollectionAssignment"
+      WHERE "id" = ${collection.id}
+      FOR UPDATE
+    `;
+    const locked = await tx.collectionAssignment.findUnique({
+      where: { id: collection.id },
+    });
+    if (!locked) {
+      redirect("/field/collections?error=collection-not-found");
+    }
+    if (
+      !canAccessCollection(
+        locked.assignedToId,
+        currentUser.id,
+        currentUser.roles,
+      )
+    ) {
+      redirect("/field/collections?error=permission-denied");
+    }
+    if (["COLLECTED", "VERIFIED", "CANCELLED"].includes(locked.status)) {
+      redirect("/field/collections?error=collection-closed");
+    }
+
+    return tx.collectionAssignment.update({
+      where: { id: locked.id },
+      data: {
+        ...data,
+        ...(requestedStatus === "ON_THE_WAY"
+          ? { onTheWayAt: locked.onTheWayAt ?? now }
+          : {}),
+        ...(requestedStatus === "REACHED"
+          ? { reachedAt: locked.reachedAt ?? now }
+          : {}),
+      },
+    });
   });
 
   await createSecurityAuditLog({
@@ -253,6 +290,12 @@ export async function uploadCollectionProofAction(formData: FormData) {
   );
 
   const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM public."CollectionAssignment"
+      WHERE "id" = ${collectionId}
+      FOR UPDATE
+    `;
     const collection = await tx.collectionAssignment.findUnique({
       where: { id: collectionId },
     });
@@ -264,7 +307,7 @@ export async function uploadCollectionProofAction(formData: FormData) {
       !canAccessCollection(
         collection.assignedToId,
         currentUser.id,
-        currentUser.role
+        currentUser.roles,
       )
     ) {
       redirect("/field/collections?error=permission-denied");

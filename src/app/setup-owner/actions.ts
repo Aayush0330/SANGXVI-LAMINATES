@@ -35,9 +35,13 @@ export async function createFirstOwnerAction(formData: FormData) {
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(7420910842::bigint)`;
     const existingOwnerCount = await tx.user.count({
       where: {
-        role: "OWNER",
+        OR: [
+          { role: "OWNER" },
+          { roleAssignments: { some: { role: "OWNER" } } },
+        ],
       },
     });
 

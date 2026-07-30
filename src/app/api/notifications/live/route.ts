@@ -1,4 +1,7 @@
-import { getNotificationSummaryForUser } from "@/lib/notifications";
+import {
+  getNotificationSummaryForUser,
+  normalizeNotificationHref,
+} from "@/lib/notifications";
 import { getCurrentSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +34,7 @@ export async function GET() {
         title: notification.title,
         message: notification.message,
         module: notification.module,
-        href: notification.href,
+        href: normalizeNotificationHref(notification.href),
         priority: notification.priority,
         createdAt: notification.createdAt,
         actorName: notification.actorName,

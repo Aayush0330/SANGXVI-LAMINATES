@@ -16,6 +16,13 @@ import {
   getOrderFulfillmentSummary,
   getOrderStatusLabel,
 } from "@/lib/order-fulfillment";
+import {
+  getOrderPaymentStatusLabel,
+  getOrderPaymentTagLabel,
+  orderPaymentTagOptions,
+} from "@/lib/order-payment";
+import { hasPermission } from "@/lib/permissions";
+import { updateOrderPaymentAction } from "./actions";
 
 const IST_TIME_ZONE = "Asia/Kolkata";
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
@@ -76,6 +83,8 @@ type PageSearchParams = {
   page?: string;
   pageSize?: string;
   order?: string;
+  success?: string;
+  error?: string;
 };
 
 type QueryValue = string | number | null | undefined;
@@ -126,6 +135,16 @@ function formatDateTime(value: Date | null | undefined) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: IST_TIME_ZONE,
+  }).format(value);
+}
+
+function formatDateInput(value: Date | null | undefined) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     timeZone: IST_TIME_ZONE,
   }).format(value);
 }
@@ -343,7 +362,7 @@ export default async function OrderJourneyHubPage({
 }: {
   searchParams?: Promise<PageSearchParams>;
 }) {
-  const { hasAccess } = await checkPermission(
+  const { currentUser, hasAccess } = await checkPermission(
     "view_order_journey",
     "/internal/orders",
   );
@@ -358,6 +377,10 @@ export default async function OrderJourneyHubPage({
   }
 
   const params = (await searchParams) ?? {};
+  const canManagePayments = hasPermission(
+    currentUser.roles,
+    "manage_collections",
+  );
   const q = sanitizeValue(params.q);
   const statusFilter = sanitizeValue(params.status);
   const dealerFilter = sanitizeValue(params.dealer);
@@ -1060,6 +1083,67 @@ export default async function OrderJourneyHubPage({
                   <div className="px-4 py-3"><p className="text-[8px] font-black uppercase tracking-[0.14em] text-slate-400">Subtotal</p><p className="mt-1 text-[12px] font-black text-slate-950 dark:text-white">{formatMoney(selectedPricing.subtotal)}</p></div>
                   <div className="px-4 py-3"><p className="text-[8px] font-black uppercase tracking-[0.14em] text-slate-400">GST</p><p className="mt-1 text-[12px] font-black text-slate-950 dark:text-white">{formatMoney(selectedPricing.tax)}</p></div>
                   <div className="px-4 py-3"><p className="text-[8px] font-black uppercase tracking-[0.14em] text-slate-400">Order Total</p><p className="mt-1 text-[12px] font-black text-blue-600 dark:text-blue-300">{formatMoney(selectedPricing.total)}</p></div>
+                </section>
+              ) : null}
+
+              {selectedPricing ? (
+                <section className="px-4 py-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-[12px] font-black text-slate-950 dark:text-white">Payment & Calendar</h3>
+                      <p className="mt-1 text-[9px] font-semibold text-slate-400">Changes automatically update the shared Google Calendar event.</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-[8px] font-black ${
+                      selectedOrder.paymentStatus === "COMPLETED"
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"
+                        : selectedOrder.paymentStatus === "IN_PROGRESS"
+                          ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200"
+                          : "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300"
+                    }`}>
+                      {getOrderPaymentStatusLabel(selectedOrder.paymentStatus)}
+                    </span>
+                  </div>
+
+                  {params.success === "payment-updated" ? (
+                    <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">Payment details saved and Calendar sync queued.</p>
+                  ) : null}
+                  {params.error ? (
+                    <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{params.error.replaceAll("-", " ")}</p>
+                  ) : null}
+
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="rounded-lg bg-slate-50 px-2.5 py-2 dark:bg-white/5"><p className="text-[7px] font-black uppercase tracking-[0.1em] text-slate-400">Type</p><p className="mt-1 truncate text-[10px] font-black text-slate-800 dark:text-slate-200">{getOrderPaymentTagLabel(selectedOrder.paymentTag)}</p></div>
+                    <div className="rounded-lg bg-emerald-50 px-2.5 py-2 dark:bg-emerald-500/10"><p className="text-[7px] font-black uppercase tracking-[0.1em] text-emerald-500">Received</p><p className="mt-1 truncate text-[10px] font-black text-emerald-700 dark:text-emerald-200">{formatMoney(selectedOrder.amountReceived)}</p></div>
+                    <div className="rounded-lg bg-amber-50 px-2.5 py-2 dark:bg-amber-500/10"><p className="text-[7px] font-black uppercase tracking-[0.1em] text-amber-500">Outstanding</p><p className="mt-1 truncate text-[10px] font-black text-amber-700 dark:text-amber-200">{formatMoney(selectedOrder.balanceAmount)}</p></div>
+                  </div>
+
+                  {canManagePayments ? (
+                    <form action={updateOrderPaymentAction} className="mt-3 grid gap-2 rounded-xl border border-slate-200 p-3 dark:border-white/10">
+                      <input type="hidden" name="orderId" value={selectedOrder.id} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[8px] font-black uppercase tracking-[0.1em] text-slate-400">
+                          Payment Type
+                          <select name="paymentTag" defaultValue={selectedOrder.paymentTag} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-bold text-slate-800 dark:border-white/10 dark:bg-slate-950 dark:text-white">
+                            {orderPaymentTagOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-[8px] font-black uppercase tracking-[0.1em] text-slate-400">
+                          Amount Received
+                          <input name="amountReceived" type="number" min="0" max={selectedPricing.total} step="1" defaultValue={selectedOrder.amountReceived} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-bold text-slate-800 dark:border-white/10 dark:bg-slate-950 dark:text-white" />
+                        </label>
+                      </div>
+                      <label className="text-[8px] font-black uppercase tracking-[0.1em] text-slate-400">
+                        Payment Timeline
+                        <input name="paymentTimelineAt" type="date" defaultValue={formatDateInput(selectedOrder.paymentTimelineAt)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-bold text-slate-800 dark:border-white/10 dark:bg-slate-950 dark:text-white" />
+                      </label>
+                      <button type="submit" className="mt-1 h-9 rounded-lg bg-blue-600 px-3 text-[10px] font-black text-white transition hover:bg-blue-700">Save Payment Update</button>
+                    </form>
+                  ) : null}
+
+                  <p className="mt-2 text-[8px] font-semibold text-slate-400">
+                    Calendar: {selectedOrder.orderCalendarStatus.replaceAll("_", " ").toLowerCase()}
+                    {selectedOrder.orderCalendarSyncedAt ? ` · ${formatDateTime(selectedOrder.orderCalendarSyncedAt)}` : ""}
+                  </p>
                 </section>
               ) : null}
 

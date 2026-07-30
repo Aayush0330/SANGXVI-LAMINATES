@@ -56,8 +56,10 @@ export function PwaInstallPrompt() {
     }
 
     const ios = isIOSDevice();
-    setShowIOSInstructions(ios);
-    setVisible(ios);
+    const iosPromptTimer = window.setTimeout(() => {
+      setShowIOSInstructions(ios);
+      setVisible(ios);
+    }, 0);
 
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -75,6 +77,7 @@ export function PwaInstallPrompt() {
     window.addEventListener("appinstalled", handleAppInstalled);
 
     return () => {
+      window.clearTimeout(iosPromptTimer);
       window.removeEventListener(
         "beforeinstallprompt",
         handleBeforeInstallPrompt,

@@ -750,7 +750,7 @@ export default async function OrderReceivingPage({
                 return (
                   <tr
                     key={order.id}
-                    className={`group transition ${
+                    className={`group relative cursor-pointer transition ${
                       selected
                         ? "bg-blue-50/80 dark:bg-blue-500/10"
                         : "hover:bg-slate-50 dark:hover:bg-white/[0.035]"
@@ -759,7 +759,8 @@ export default async function OrderReceivingPage({
                     <td className="px-4 py-4 align-middle">
                       <Link
                         href={buildHref(queryState, { order: order.id })}
-                        className="block"
+                        aria-label={`Open ${order.orderNumber}`}
+                        className="block after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-blue-500"
                       >
                         <p className="text-sm font-black text-blue-700 dark:text-blue-300">
                           {order.orderNumber}
@@ -834,13 +835,12 @@ export default async function OrderReceivingPage({
                       {compactDate(order.updatedAt)}
                     </td>
                     <td className="px-4 py-4 text-right align-middle">
-                      <Link
-                        href={buildHref(queryState, { order: order.id })}
-                        aria-label={`Open ${order.orderNumber}`}
+                      <span
+                        aria-hidden="true"
                         className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition group-hover:border-blue-200 group-hover:text-blue-700 dark:border-white/10 dark:text-slate-300 dark:group-hover:border-blue-500/30 dark:group-hover:text-blue-200"
                       >
                         <Icon name="arrow" className="h-4 w-4" />
-                      </Link>
+                      </span>
                     </td>
                   </tr>
                 );

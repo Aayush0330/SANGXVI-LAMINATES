@@ -41,7 +41,10 @@ export default async function SetupOwnerPage({
 
   const existingOwnerCount = await prisma.user.count({
     where: {
-      role: "OWNER",
+      OR: [
+        { role: "OWNER" },
+        { roleAssignments: { some: { role: "OWNER" } } },
+      ],
     },
   });
 

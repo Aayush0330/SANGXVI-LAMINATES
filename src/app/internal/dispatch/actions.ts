@@ -53,6 +53,45 @@ function parseIssueType(value: string) {
     : null;
 }
 
+type LockedPhysicalAssignment = {
+  id: string;
+  orderId: string;
+  status: PhysicalCheckStatus;
+  orderStatus: OrderStatus;
+};
+
+async function lockPhysicalAssignment(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  assignmentId: string,
+  allowedStatuses: readonly PhysicalCheckStatus[],
+) {
+  const rows = await tx.$queryRaw<LockedPhysicalAssignment[]>`
+    SELECT
+      assignment."id",
+      assignment."orderId",
+      assignment."status",
+      orders."status" AS "orderStatus"
+    FROM public."OrderPhysicalAssignment" AS assignment
+    INNER JOIN public."Order" AS orders ON orders."id" = assignment."orderId"
+    WHERE assignment."id" = ${assignmentId}
+    FOR UPDATE OF assignment, orders
+  `;
+  const locked = rows[0];
+  if (
+    !locked ||
+    !allowedStatuses.includes(locked.status) ||
+    ([
+      OrderStatus.CANCELLATION_REQUESTED,
+      OrderStatus.CANCELLED,
+      OrderStatus.DELIVERED,
+      OrderStatus.INVOICE_UPLOADED,
+    ] as OrderStatus[]).includes(locked.orderStatus)
+  ) {
+    throw new Error("WORKFLOW_STATE_CHANGED");
+  }
+  return locked;
+}
+
 async function assertPhysicalAccess() {
   const { currentUser, hasAccess } = await checkPermission(
     "manage_dispatch",
@@ -131,9 +170,14 @@ export async function startPhysicalCheckAction(formData: FormData) {
   const startingQcRework =
     assignment.status === PhysicalCheckStatus.QC_REWORK;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.orderPhysicalAssignment.update({
-      where: { id: assignment.id },
+  try {
+    await prisma.$transaction(async (tx) => {
+    await lockPhysicalAssignment(tx, assignment.id, [
+      PhysicalCheckStatus.ASSIGNED,
+      PhysicalCheckStatus.QC_REWORK,
+    ]);
+    const transitioned = await tx.orderPhysicalAssignment.updateMany({
+      where: { id: assignment.id, status: assignment.status },
       data: {
         status: PhysicalCheckStatus.IN_PROGRESS,
         startedById: currentUser.id,
@@ -143,6 +187,7 @@ export async function startPhysicalCheckAction(formData: FormData) {
         issueNotes: null,
       },
     });
+    if (transitioned.count !== 1) throw new Error("WORKFLOW_STATE_CHANGED");
 
     if (assignment.status === PhysicalCheckStatus.QC_REWORK) {
       await setAutomatedTaskStatus({
@@ -195,7 +240,13 @@ export async function startPhysicalCheckAction(formData: FormData) {
         currentUser,
       });
     }
-  });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "WORKFLOW_STATE_CHANGED") {
+      redirect(dispatchUrl("error", "invalid-assignment-status"));
+    }
+    throw error;
+  }
 
   await createSecurityAuditLog({
     eventType: "PHYSICAL_CHECK_STARTED",
@@ -294,19 +345,33 @@ export async function completePhysicalCheckAction(formData: FormData) {
         : PhysicalCheckIssueType.SHORT_QUANTITY);
 
     await prisma.$transaction(async (tx) => {
+      await lockPhysicalAssignment(tx, assignment.id, [
+        PhysicalCheckStatus.IN_PROGRESS,
+        PhysicalCheckStatus.ISSUE_REPORTED,
+        PhysicalCheckStatus.QC_REWORK,
+      ]);
       for (const item of checkedItems) {
         const orderItem = item.item.orderItem;
         const existingBlocked = orderItem.blockedQuantity;
 
         if (existingBlocked > 0) {
-          const updatedProduct = await tx.product.update({
-            where: { id: orderItem.productId },
+          const released = await tx.product.updateMany({
+            where: {
+              id: orderItem.productId,
+              blocked: { gte: existingBlocked },
+            },
             data: {
               quantity: { increment: existingBlocked },
               blocked: { decrement: existingBlocked },
             },
           });
+          if (released.count !== 1) {
+            throw new Error("PRODUCT_STOCK_CHANGED");
+          }
 
+          const updatedProduct = await tx.product.findUniqueOrThrow({
+            where: { id: orderItem.productId },
+          });
           await tx.product.update({
             where: { id: orderItem.productId },
             data: {
@@ -443,6 +508,11 @@ export async function completePhysicalCheckAction(formData: FormData) {
 
   try {
     await prisma.$transaction(async (tx) => {
+      await lockPhysicalAssignment(tx, assignment.id, [
+        PhysicalCheckStatus.IN_PROGRESS,
+        PhysicalCheckStatus.ISSUE_REPORTED,
+        PhysicalCheckStatus.QC_REWORK,
+      ]);
       for (const checked of checkedItems) {
         const orderItem = checked.item.orderItem;
         const desiredBlocked =
@@ -502,14 +572,23 @@ export async function completePhysicalCheckAction(formData: FormData) {
         }
 
         if (releaseQuantity > 0) {
-          const updatedProduct = await tx.product.update({
-            where: { id: orderItem.productId },
+          const released = await tx.product.updateMany({
+            where: {
+              id: orderItem.productId,
+              blocked: { gte: releaseQuantity },
+            },
             data: {
               quantity: { increment: releaseQuantity },
               blocked: { decrement: releaseQuantity },
             },
           });
+          if (released.count !== 1) {
+            throw new Error("PRODUCT_STOCK_CHANGED");
+          }
 
+          const updatedProduct = await tx.product.findUniqueOrThrow({
+            where: { id: orderItem.productId },
+          });
           await tx.product.update({
             where: { id: orderItem.productId },
             data: {
@@ -676,18 +755,32 @@ export async function completePhysicalCheckAction(formData: FormData) {
   } catch (error) {
     if (error instanceof Error && error.message === "PRODUCT_STOCK_CHANGED") {
       await prisma.$transaction(async (tx) => {
+        await lockPhysicalAssignment(tx, assignment.id, [
+          PhysicalCheckStatus.IN_PROGRESS,
+          PhysicalCheckStatus.ISSUE_REPORTED,
+          PhysicalCheckStatus.QC_REWORK,
+        ]);
         for (const assignmentItem of assignment.items) {
           const orderItem = assignmentItem.orderItem;
           if (orderItem.blockedQuantity <= 0) continue;
 
-          const updatedProduct = await tx.product.update({
-            where: { id: orderItem.productId },
+          const released = await tx.product.updateMany({
+            where: {
+              id: orderItem.productId,
+              blocked: { gte: orderItem.blockedQuantity },
+            },
             data: {
               quantity: { increment: orderItem.blockedQuantity },
               blocked: { decrement: orderItem.blockedQuantity },
             },
           });
+          if (released.count !== 1) {
+            throw new Error("PRODUCT_STOCK_CHANGED");
+          }
 
+          const updatedProduct = await tx.product.findUniqueOrThrow({
+            where: { id: orderItem.productId },
+          });
           await tx.product.update({
             where: { id: orderItem.productId },
             data: {
@@ -756,6 +849,10 @@ export async function completePhysicalCheckAction(formData: FormData) {
       });
 
       redirect(dispatchUrl("error", "stock-changed"));
+    }
+
+    if (error instanceof Error && error.message === "WORKFLOW_STATE_CHANGED") {
+      redirect(dispatchUrl("error", "invalid-assignment-status"));
     }
 
     throw error;
@@ -837,6 +934,9 @@ export async function resolvePhysicalBlockerAction(formData: FormData) {
   }
 
   await prisma.$transaction(async (tx) => {
+    await lockPhysicalAssignment(tx, assignment.id, [
+      PhysicalCheckStatus.ISSUE_REPORTED,
+    ]);
     // Legacy issue records may still hold an incomplete reservation. Release it
     // before restarting verification so the next check always begins from
     // one complete, unambiguous stock quantity.
@@ -845,15 +945,29 @@ export async function resolvePhysicalBlockerAction(formData: FormData) {
       if (blockedQuantity <= 0) continue;
 
       const product = assignmentItem.orderItem.product;
-      const nextQuantity = product.quantity + blockedQuantity;
-      const nextBlocked = Math.max(0, product.blocked - blockedQuantity);
+      const released = await tx.product.updateMany({
+        where: {
+          id: product.id,
+          blocked: { gte: blockedQuantity },
+        },
+        data: {
+          quantity: { increment: blockedQuantity },
+          blocked: { decrement: blockedQuantity },
+        },
+      });
+      if (released.count !== 1) throw new Error("PRODUCT_STOCK_CHANGED");
 
+      const updatedProduct = await tx.product.findUniqueOrThrow({
+        where: { id: product.id },
+        select: { quantity: true, minimumStock: true },
+      });
       await tx.product.update({
         where: { id: product.id },
         data: {
-          quantity: nextQuantity,
-          blocked: nextBlocked,
-          status: getProductStatus(nextQuantity, product.minimumStock),
+          status: getProductStatus(
+            updatedProduct.quantity,
+            updatedProduct.minimumStock,
+          ),
         },
       });
 
@@ -1054,19 +1168,33 @@ export async function approveCancellationRequestAction(formData: FormData) {
         });
       }
 
-      await tx.orderItem.update({
-        where: { id: item.id },
-        data: {
+      const itemUpdated = await tx.orderItem.updateMany({
+        where: {
+          id: item.id,
           requestedQuantity: closure.requested,
           quantity: closure.workingQuantity,
+          blockedQuantity,
+          deliveredQuantity: 0,
+          cancelledQuantity: 0,
+        },
+        data: {
+          requestedQuantity: closure.requested,
+          quantity: closure.requested,
           blockedQuantity: 0,
+          deliveredQuantity: 0,
           cancelledQuantity: closure.cancelled,
         },
       });
+      if (itemUpdated.count !== 1) {
+        throw new Error("Order fulfillment changed before cancellation approval.");
+      }
     }
 
-    await tx.order.update({
-      where: { id: order.id },
+    const transitioned = await tx.order.updateMany({
+      where: {
+        id: order.id,
+        status: CANCELLATION_REQUESTED_STATUS,
+      },
       data: {
         status: OrderStatus.CANCELLED,
         assignedDriverId: null,
@@ -1079,6 +1207,9 @@ export async function approveCancellationRequestAction(formData: FormData) {
           approvalNote || "Cancellation approved by management.",
       },
     });
+    if (transitioned.count !== 1) {
+      throw new Error("Order status changed before cancellation approval.");
+    }
 
     await tx.orderPhysicalAssignment.updateMany({
       where: { orderId: order.id },

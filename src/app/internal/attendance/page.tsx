@@ -1,9 +1,8 @@
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
 import { checkPermission } from "@/lib/auth-guards";
 import { markStaleAttendanceForReview } from "@/lib/attendance-reconciliation";
-import { correctAttendanceAction } from "./actions";
 import {
   formatDuration,
   formatIndiaDateTime,
@@ -18,21 +17,34 @@ import {
   type EmployeeAttendanceRow,
   type OfficeAttendanceEventRow,
 } from "@/lib/office-attendance";
+import { correctAttendanceAction } from "./actions";
+
+type MetricTone = "emerald" | "blue" | "amber" | "slate" | "rose";
 
 function getStatusLabel(row: EmployeeAttendanceRow) {
   if (row.status === "REVIEW_REQUIRED") return "Review Required";
   if (row.punchOutAt || row.status === "COMPLETED") return "Completed";
-  if (row.currentBreakType) return `On ${getBreakTypeLabel(row.currentBreakType)}`;
+  if (row.currentBreakType) {
+    return `On ${getBreakTypeLabel(row.currentBreakType)}`;
+  }
   if (row.punchInAt) return "Punched In";
   return "Not Punched In";
 }
 
 function getStatusClass(label: string) {
-  if (label === "Completed") return "bg-emerald-50 text-emerald-700";
-  if (label.startsWith("On ")) return "bg-amber-50 text-yellow-300";
-  if (label === "Punched In") return "bg-blue-50 text-blue-600";
-  if (label === "Review Required") return "bg-rose-50 text-rose-700";
-  return "bg-slate-500/10 text-slate-500";
+  if (label === "Completed") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-600/10 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20";
+  }
+  if (label.startsWith("On ")) {
+    return "bg-amber-50 text-amber-800 ring-amber-600/10 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20";
+  }
+  if (label === "Punched In") {
+    return "bg-blue-50 text-blue-700 ring-blue-600/10 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-blue-400/20";
+  }
+  if (label === "Review Required") {
+    return "bg-rose-50 text-rose-700 ring-rose-600/10 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/20";
+  }
+  return "bg-slate-100 text-slate-600 ring-slate-500/10 dark:bg-white/10 dark:text-slate-300 dark:ring-white/10";
 }
 
 function groupEventsByAttendance(events: OfficeAttendanceEventRow[]) {
@@ -53,7 +65,10 @@ function isValidWorkDate(value: string) {
   }
 
   const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value
+  );
 }
 
 function formatIndiaDateTimeLocal(value?: Date | string | null) {
@@ -74,6 +89,182 @@ function formatIndiaDateTimeLocal(value?: Date | string | null) {
   return `${valueOf("year")}-${valueOf("month")}-${valueOf("day")}T${valueOf("hour")}:${valueOf("minute")}`;
 }
 
+function formatSelectedDate(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "UTC",
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${value}T00:00:00Z`));
+}
+
+function getInitials(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "U"
+  );
+}
+
+function formatRole(role: string) {
+  return role
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDistance(value?: number | null) {
+  return value !== null && value !== undefined
+    ? `${Math.round(value)}m from office`
+    : "Distance unavailable";
+}
+
+function MetricIcon({ tone }: { tone: MetricTone }) {
+  const commonProps = {
+    viewBox: "0 0 24 24",
+    className: "h-5 w-5",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  if (tone === "emerald") {
+    return (
+      <svg {...commonProps}>
+        <path d="m5 12 4 4L19 6" />
+        <circle cx="12" cy="12" r="9" />
+      </svg>
+    );
+  }
+
+  if (tone === "blue") {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="8" r="3" />
+        <path d="M6 20v-2a6 6 0 0 1 12 0v2M18 8h3M19.5 6.5v3" />
+      </svg>
+    );
+  }
+
+  if (tone === "amber") {
+    return (
+      <svg {...commonProps}>
+        <path d="M8 4h8M9 4v5l-3 4a4 4 0 0 0 3.2 7h5.6A4 4 0 0 0 18 13l-3-4V4" />
+        <path d="M8 14h8" />
+      </svg>
+    );
+  }
+
+  if (tone === "rose") {
+    return (
+      <svg {...commonProps}>
+        <path d="M12 8v5M12 17h.01" />
+        <path d="M10.2 4.7 3.4 17a2 2 0 0 0 1.8 3h13.6a2 2 0 0 0 1.8-3L13.8 4.7a2 2 0 0 0-3.6 0Z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...commonProps}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  helper,
+  tone,
+}: {
+  label: string;
+  value: number;
+  helper: string;
+  tone: MetricTone;
+}) {
+  const classes = {
+    emerald: {
+      icon: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+      value: "text-emerald-700 dark:text-emerald-300",
+      accent: "bg-emerald-500",
+    },
+    blue: {
+      icon: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
+      value: "text-blue-700 dark:text-blue-300",
+      accent: "bg-blue-500",
+    },
+    amber: {
+      icon: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300",
+      value: "text-amber-700 dark:text-amber-300",
+      accent: "bg-amber-500",
+    },
+    slate: {
+      icon: "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300",
+      value: "text-slate-800 dark:text-slate-100",
+      accent: "bg-slate-400",
+    },
+    rose: {
+      icon: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
+      value: "text-rose-700 dark:text-rose-300",
+      accent: "bg-rose-500",
+    },
+  }[tone];
+
+  return (
+    <article className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-slate-900">
+      <span className={`absolute inset-y-0 left-0 w-0.5 ${classes.accent}`} />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">
+            {label}
+          </p>
+          <p
+            className={`mt-2 text-3xl font-black tracking-tight ${classes.value}`}
+          >
+            {value}
+          </p>
+        </div>
+        <span
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${classes.icon}`}
+        >
+          <MetricIcon tone={tone} />
+        </span>
+      </div>
+      <p className="mt-2 text-[11px] font-semibold text-slate-400">{helper}</p>
+    </article>
+  );
+}
+
+function ActionLink({
+  href,
+  label,
+  primary = false,
+}: {
+  href: string;
+  label: string;
+  primary?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3.5 text-xs font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+        primary
+          ? "bg-blue-600 text-white shadow-[0_8px_20px_rgba(37,99,235,0.16)] hover:bg-blue-700"
+          : "border border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:border-blue-400/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-200"
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export default async function InternalAttendancePage({
   searchParams,
 }: {
@@ -83,7 +274,10 @@ export default async function InternalAttendancePage({
     success?: string;
   }>;
 }) {
-  const { hasAccess } = await checkPermission("manage_attendance", "/internal/attendance");
+  const { hasAccess } = await checkPermission(
+    "manage_attendance",
+    "/internal/attendance",
+  );
 
   if (!hasAccess) {
     return (
@@ -99,244 +293,542 @@ export default async function InternalAttendancePage({
   const params = await searchParams;
   await markStaleAttendanceForReview();
   const selectedDate =
-    params?.date && isValidWorkDate(params.date) ? params.date : getIndiaWorkDate();
+    params?.date && isValidWorkDate(params.date)
+      ? params.date
+      : getIndiaWorkDate();
   const office = await getActiveOfficeLocation();
   const rows = await getEmployeeAttendanceRows(selectedDate);
   const events = await getAttendanceEventsForDate(selectedDate);
   const eventMap = groupEventsByAttendance(events);
   const attempts = await getRecentAttendanceAttempts(20);
 
-  const completedCount = rows.filter((row) => row.punchOutAt || row.status === "COMPLETED").length;
-  const punchedInCount = rows.filter((row) => row.punchInAt && !row.punchOutAt && !row.currentBreakType).length;
+  const completedCount = rows.filter(
+    (row) => row.punchOutAt || row.status === "COMPLETED",
+  ).length;
+  const punchedInCount = rows.filter(
+    (row) => row.punchInAt && !row.punchOutAt && !row.currentBreakType,
+  ).length;
   const onBreakCount = rows.filter((row) => row.currentBreakType).length;
   const notPunchedCount = rows.filter((row) => !row.punchInAt).length;
-  const blockedAttempts = attempts.filter((attempt) => attempt.status === "BLOCKED_OUTSIDE_OFFICE").length;
+  const blockedAttempts = attempts.filter(
+    (attempt) => attempt.status === "BLOCKED_OUTSIDE_OFFICE",
+  ).length;
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7">
-        <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-600">
-          Office Attendance
-        </p>
+    <div className="space-y-5">
+      <section className="relative overflow-hidden rounded-[28px] border border-slate-200/90 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-7 dark:border-white/10 dark:bg-slate-900">
+        <div
+          className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-blue-500/[0.08] blur-3xl dark:bg-blue-500/10"
+          aria-hidden="true"
+        />
+        <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-600 dark:text-blue-300">
+              Workforce operations
+            </p>
+            <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl dark:text-white">
+              Team Attendance
+            </h1>
+            <p className="mt-2 text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
+              Monitor office presence, verify attendance evidence and resolve
+              exceptions from one manager workspace.
+            </p>
 
-        <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-          <div>
-            <h1 className="text-3xl font-black sm:text-5xl">Team Attendance</h1>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <ActionLink
+                href="/internal/attendance/summary"
+                label="Attendance Summary"
+              />
+              <ActionLink
+                href="/internal/attendance/payroll"
+                label="Payroll"
+              />
+              <ActionLink
+                href="/internal/attendance/settings"
+                label="Office Setup"
+              />
+              <ActionLink
+                href="/account/attendance"
+                label="My Attendance"
+                primary
+              />
+            </div>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/internal/attendance/payroll"
-              className="inline-flex h-12 items-center justify-center rounded-2xl border border-slate-200 px-5 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-            >
-              Payroll
-            </Link>
+          <div className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 p-4 xl:w-[360px] dark:border-white/10 dark:bg-white/[0.035]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.17em] text-slate-400">
+                  Attendance date
+                </p>
+                <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">
+                  {formatSelectedDate(selectedDate)}
+                </p>
+              </div>
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${
+                  office ? "bg-emerald-500" : "bg-amber-500"
+                }`}
+              />
+            </div>
 
-            <Link
-              href="/internal/attendance/settings"
-              className="inline-flex h-12 items-center justify-center rounded-2xl border border-slate-200 px-5 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-            >
-              Office Setup
-            </Link>
-
-            <Link
-              href="/account/attendance"
-              className="inline-flex h-12 items-center justify-center rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700"
-            >
-              My Attendance
-            </Link>
+            <form className="mt-4 flex gap-2">
+              <input
+                aria-label="Attendance date"
+                name="date"
+                type="date"
+                defaultValue={selectedDate}
+                className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-500/10"
+              />
+              <button className="h-10 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-600 dark:hover:bg-blue-700">
+                Apply
+              </button>
+            </form>
           </div>
         </div>
       </section>
 
       {!office ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
-          <h2 className="font-bold">Office location is not configured</h2>
-          <p className="mt-2 text-sm leading-6 text-amber-800/80">
-            Attendance punch, break and logout actions will stay blocked until owner sets office location and radius.
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900 dark:border-amber-400/20 dark:bg-amber-500/[0.08] dark:text-amber-200">
+          <h2 className="font-black">Office location is not configured</h2>
+          <p className="mt-2 text-sm font-medium leading-6 text-amber-800/80 dark:text-amber-200/75">
+            Attendance punch, break and Punch Out actions will stay blocked
+            until the owner sets an office location and radius.
           </p>
         </div>
       ) : null}
 
       {params?.success === "attendance-corrected" ? (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
+        <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-500/[0.08] dark:text-emerald-200">
+          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
           Attendance was corrected and the audit history was saved.
         </div>
       ) : null}
+
       {params?.error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">
-          The attendance correction could not be saved. Check the times and reason, then try again.
+        <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-800 dark:border-rose-400/20 dark:bg-rose-500/[0.08] dark:text-rose-200">
+          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
+          The attendance correction could not be saved. Check the times and
+          reason, then try again.
         </div>
       ) : null}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Completed</p>
-          <p className="mt-3 text-3xl font-black text-emerald-700">{completedCount}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Currently In</p>
-          <p className="mt-3 text-3xl font-black text-blue-600">{punchedInCount}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">On Break</p>
-          <p className="mt-3 text-3xl font-black text-yellow-300">{onBreakCount}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Not Punched</p>
-          <p className="mt-3 text-3xl font-black text-slate-600">{notPunchedCount}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Blocked Attempts</p>
-          <p className="mt-3 text-3xl font-black text-red-700">{blockedAttempts}</p>
-        </div>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard
+          label="Completed"
+          value={completedCount}
+          helper="Shift closed"
+          tone="emerald"
+        />
+        <MetricCard
+          label="Currently In"
+          value={punchedInCount}
+          helper="Actively working"
+          tone="blue"
+        />
+        <MetricCard
+          label="On Break"
+          value={onBreakCount}
+          helper="Break timer active"
+          tone="amber"
+        />
+        <MetricCard
+          label="Not Punched"
+          value={notPunchedCount}
+          helper="No Punch In yet"
+          tone="slate"
+        />
+        <MetricCard
+          label="Recent Blocks"
+          value={blockedAttempts}
+          helper="Outside office area"
+          tone="rose"
+        />
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <form className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <section className="overflow-hidden rounded-[28px] border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-5 sm:px-6 dark:border-white/10">
           <div>
-            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Date</label>
-            <input
-              name="date"
-              type="date"
-              defaultValue={selectedDate}
-              className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none transition focus:border-blue-500"
-            />
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-300">
+              Daily workforce register
+            </p>
+            <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950 dark:text-white">
+              Employee attendance
+            </h2>
           </div>
-          <button className="h-12 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700">
-            Apply
-          </button>
-        </form>
-      </section>
+          <div className="flex flex-wrap items-center gap-2">
+            {office ? (
+              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-black text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {office.name} · {office.radiusMeters}m
+              </span>
+            ) : null}
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-600 dark:bg-white/10 dark:text-slate-300">
+              {rows.length} {rows.length === 1 ? "employee" : "employees"}
+            </span>
+          </div>
+        </div>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="overflow-x-auto">
-          <table className="min-w-[1580px] w-full text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs uppercase tracking-[0.16em] text-slate-500">
-              <tr>
-                <th className="px-5 py-4">User</th>
-                <th className="px-5 py-4">Status</th>
-                <th className="px-5 py-4">Punch In</th>
-                <th className="px-5 py-4">Logging Out</th>
-                <th className="px-5 py-4">Breaks</th>
-                <th className="px-5 py-4">Work Time</th>
-                <th className="px-5 py-4">Timeline & Photos</th>
-                <th className="px-5 py-4">Manager Correction</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((row) => {
-                const statusLabel = getStatusLabel(row);
-                const rowEvents = row.attendanceId ? eventMap.get(row.attendanceId) || [] : [];
+        <div className="space-y-3 bg-slate-50/60 p-3 sm:p-4 dark:bg-slate-950/35">
+          {rows.map((row) => {
+            const statusLabel = getStatusLabel(row);
+            const rowEvents = row.attendanceId
+              ? eventMap.get(row.attendanceId) || []
+              : [];
 
-                return (
-                  <tr key={row.userId} className="align-top">
-                    <td className="px-5 py-4">
-                      <p className="font-bold text-slate-950">{row.userName}</p>
-                      <p className="mt-1 text-xs text-slate-500">{row.userEmail}</p>
-                      <p className="mt-1 text-xs text-slate-500">{row.userRole.replaceAll("_", " ")}</p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusClass(statusLabel)}`}>
-                        {statusLabel}
+            return (
+              <article
+                key={row.userId}
+                className={`overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:bg-slate-900 ${
+                  statusLabel === "Review Required"
+                    ? "border-rose-200 dark:border-rose-400/25"
+                    : "border-slate-200/90 dark:border-white/10"
+                }`}
+              >
+                <div className="p-4 sm:p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-xs font-black text-white dark:bg-blue-600">
+                        {getInitials(row.userName)}
                       </span>
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      <p>{formatIndiaDateTime(row.punchInAt)}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {row.punchInDistanceMeters !== null && row.punchInDistanceMeters !== undefined ? `${Math.round(row.punchInDistanceMeters)}m from office` : "-"}
+                      <div className="min-w-0">
+                        <p className="truncate font-black text-slate-950 dark:text-white">
+                          {row.userName}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs font-semibold text-slate-400">
+                          {row.userEmail}
+                        </p>
+                        <p className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">
+                          {formatRole(row.userRole)}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`inline-flex w-fit items-center rounded-full px-3 py-1.5 text-[10px] font-black ring-1 ${getStatusClass(
+                        statusLabel,
+                      )}`}
+                    >
+                      {statusLabel}
+                    </span>
+                  </div>
+
+                  <div className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4 dark:border-white/10 dark:bg-white/10">
+                    <div className="bg-slate-50 p-4 dark:bg-white/[0.035]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                        Punch In
                       </p>
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      <p>{formatIndiaDateTime(row.punchOutAt)}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {row.punchOutDistanceMeters !== null && row.punchOutDistanceMeters !== undefined ? `${Math.round(row.punchOutDistanceMeters)}m from office` : "-"}
+                      <p className="mt-2 text-sm font-black text-slate-800 dark:text-slate-100">
+                        {formatIndiaTime(row.punchInAt)}
                       </p>
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      <p className="font-bold text-yellow-300">{formatDuration(row.breakMinutes)}</p>
-                      {row.currentBreakType ? (
-                        <p className="mt-1 text-xs text-yellow-300">Currently on {getBreakTypeLabel(row.currentBreakType)}</p>
-                      ) : null}
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      <p>Total: {formatDuration(row.totalMinutes)}</p>
-                      <p className="mt-1 text-xs text-emerald-700">Net: {formatDuration(row.netWorkingMinutes)}</p>
-                    </td>
-                    <td className="px-5 py-4">
+                      <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                        {formatDistance(row.punchInDistanceMeters)}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 p-4 dark:bg-white/[0.035]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                        Punch Out
+                      </p>
+                      <p className="mt-2 text-sm font-black text-slate-800 dark:text-slate-100">
+                        {formatIndiaTime(row.punchOutAt)}
+                      </p>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                        {formatDistance(row.punchOutDistanceMeters)}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 p-4 dark:bg-white/[0.035]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                        Break Time
+                      </p>
+                      <p className="mt-2 text-sm font-black text-amber-700 dark:text-amber-300">
+                        {formatDuration(row.breakMinutes)}
+                      </p>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                        {row.currentBreakType
+                          ? `On ${getBreakTypeLabel(row.currentBreakType)}`
+                          : "No active break"}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 p-4 dark:bg-white/[0.035]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                        Net Work
+                      </p>
+                      <p className="mt-2 text-sm font-black text-emerald-700 dark:text-emerald-300">
+                        {formatDuration(row.netWorkingMinutes)}
+                      </p>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                        {formatDuration(row.totalMinutes)} total office time
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <details
+                  className="group border-t border-slate-100 dark:border-white/10"
+                  open={statusLabel === "Review Required"}
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-xs font-black text-slate-600 transition hover:bg-slate-50 sm:px-5 dark:text-slate-300 dark:hover:bg-white/[0.035]">
+                    <span className="flex items-center gap-2">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-4 w-4 text-blue-600 dark:text-blue-300"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M4 5h16v14H4z" />
+                        <path d="m8 14 2-2 2 2 4-4 2 2" />
+                      </svg>
+                      Evidence timeline and manager correction
+                    </span>
+                    <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                      {rowEvents.length} events
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-4 w-4 transition group-open:rotate-180"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="m7 10 5 5 5-5" />
+                      </svg>
+                    </span>
+                  </summary>
+
+                  <div className="grid gap-5 border-t border-slate-100 bg-slate-50/60 p-4 sm:p-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] dark:border-white/10 dark:bg-slate-950/35">
+                    <div>
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                          Verified timeline
+                        </h3>
+                        <span className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">
+                          Server time
+                        </span>
+                      </div>
+
                       {rowEvents.length > 0 ? (
-                        <div className="space-y-3">
-                          <div className="grid gap-2">
-                            {rowEvents.map((event) => (
-                              <div key={event.id} className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
-                                <div className="flex items-start justify-between gap-3">
+                        <div className="mt-3 space-y-2">
+                          {rowEvents.map((event, index) => (
+                            <div
+                              key={event.id}
+                              className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-slate-900"
+                            >
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[10px] font-black text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                                {String(index + 1).padStart(2, "0")}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
                                   <div>
-                                    <p className="text-xs font-bold text-slate-700">{getAttendanceActionLabel(event.eventType)}</p>
-                                    <p className="mt-1 text-xs text-slate-500">{formatIndiaTime(event.createdAt)}</p>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {event.distanceMeters !== null && event.distanceMeters !== undefined ? `${Math.round(event.distanceMeters)}m from office` : "-"}
+                                    <p className="text-xs font-black text-slate-800 dark:text-slate-100">
+                                      {getAttendanceActionLabel(
+                                        event.eventType,
+                                      )}
+                                    </p>
+                                    <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                                      {formatIndiaTime(event.createdAt)} ·{" "}
+                                      {formatDistance(event.distanceMeters)}
                                     </p>
                                   </div>
                                   {event.photoDataUrl ? (
                                     <Image
                                       src={event.photoDataUrl}
                                       alt={event.label}
-                                      width={64}
-                                      height={48}
+                                      width={80}
+                                      height={56}
                                       unoptimized
-                                      className="h-12 w-16 rounded-xl border border-slate-200 object-cover"
+                                      className="h-14 w-20 rounded-xl border border-slate-200 object-cover dark:border-white/10"
                                     />
                                   ) : null}
                                 </div>
                               </div>
-                            ))}
-                          </div>
+                            </div>
+                          ))}
                         </div>
                       ) : (
-                        <span className="text-slate-500">-</span>
+                        <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-xs font-semibold text-slate-400 dark:border-white/10 dark:bg-slate-900">
+                          No attendance evidence recorded for this employee.
+                        </div>
                       )}
-                    </td>
-                    <td className="px-5 py-4">
+                    </div>
+
+                    <div>
+                      <div>
+                        <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                          Manager correction
+                        </h3>
+                        <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                          Every saved change is added to the audit history.
+                        </p>
+                      </div>
+
                       {row.attendanceId ? (
-                        <form action={correctAttendanceAction} className="grid min-w-[280px] gap-2">
-                          <input type="hidden" name="attendanceId" value={row.attendanceId} />
-                          <input type="hidden" name="selectedDate" value={selectedDate} />
-                          <input name="correctedPunchIn" type="datetime-local" defaultValue={formatIndiaDateTimeLocal(row.punchInAt)} required className="h-10 rounded-xl border border-slate-200 px-3 text-xs" />
-                          <input name="correctedPunchOut" type="datetime-local" defaultValue={formatIndiaDateTimeLocal(row.punchOutAt)} required className="h-10 rounded-xl border border-slate-200 px-3 text-xs" />
-                          <input name="reason" required placeholder="Correction reason" className="h-10 rounded-xl border border-slate-200 px-3 text-xs" />
-                          <button className="h-10 rounded-xl bg-slate-950 px-3 text-xs font-black text-white">Save Correction</button>
+                        <form
+                          action={correctAttendanceAction}
+                          className="mt-3 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-slate-900"
+                        >
+                          <input
+                            type="hidden"
+                            name="attendanceId"
+                            value={row.attendanceId}
+                          />
+                          <input
+                            type="hidden"
+                            name="selectedDate"
+                            value={selectedDate}
+                          />
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <label>
+                              <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.13em] text-slate-400">
+                                Punch In
+                              </span>
+                              <input
+                                name="correctedPunchIn"
+                                type="datetime-local"
+                                defaultValue={formatIndiaDateTimeLocal(
+                                  row.punchInAt,
+                                )}
+                                required
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-500/10"
+                              />
+                            </label>
+                            <label>
+                              <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.13em] text-slate-400">
+                                Punch Out
+                              </span>
+                              <input
+                                name="correctedPunchOut"
+                                type="datetime-local"
+                                defaultValue={formatIndiaDateTimeLocal(
+                                  row.punchOutAt,
+                                )}
+                                required
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-500/10"
+                              />
+                            </label>
+                          </div>
+
+                          <label>
+                            <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.13em] text-slate-400">
+                              Correction reason
+                            </span>
+                            <input
+                              name="reason"
+                              required
+                              autoComplete="off"
+                              placeholder="Add a clear audit reason"
+                              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-500/10"
+                            />
+                          </label>
+
+                          <button className="h-10 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-600 dark:hover:bg-blue-700">
+                            Save Audited Correction
+                          </button>
                         </form>
-                      ) : <span className="text-slate-400">No attendance record</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      ) : (
+                        <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-xs font-semibold text-slate-400 dark:border-white/10 dark:bg-slate-900">
+                          No attendance record is available to correct.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              </article>
+            );
+          })}
+
+          {rows.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-14 text-center dark:border-white/10 dark:bg-slate-900">
+              <p className="text-sm font-black text-slate-800 dark:text-slate-200">
+                No workforce records found
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                There are no attendance-enabled employees for this date.
+              </p>
+            </div>
+          ) : null}
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="text-xl font-bold">Recent Attendance Attempts</h2>
-        <p className="mt-1 text-sm text-slate-500">Approved and blocked punch/break/logout attempts.</p>
-        <div className="mt-4 grid gap-3">
-          {attempts.map((attempt) => (
-            <article key={attempt.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-                <div>
-                  <p className="font-bold text-slate-950">{attempt.userName}</p>
-                  <p className="mt-1 text-xs text-slate-500">{attempt.userEmail}</p>
-                  <p className="mt-1 text-xs text-slate-500">{getAttendanceActionLabel(attempt.actionType)}</p>
+      <section className="overflow-hidden rounded-[28px] border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-5 sm:px-6 dark:border-white/10">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Security trail
+            </p>
+            <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950 dark:text-white">
+              Recent attendance attempts
+            </h2>
+            <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+              Latest approved and blocked punch, break and Punch Out requests.
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-600 dark:bg-white/10 dark:text-slate-300">
+            Last {attempts.length}
+          </span>
+        </div>
+
+        <div className="grid gap-3 p-4 sm:p-5 xl:grid-cols-2">
+          {attempts.map((attempt) => {
+            const approved = attempt.status === "APPROVED";
+
+            return (
+              <article
+                key={attempt.id}
+                className="rounded-2xl border border-slate-200/90 bg-slate-50/60 p-4 dark:border-white/10 dark:bg-white/[0.035]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-black ${
+                        approved
+                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                          : "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                      }`}
+                    >
+                      {getInitials(attempt.userName)}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black text-slate-900 dark:text-white">
+                        {attempt.userName}
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
+                        {getAttendanceActionLabel(attempt.actionType)}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.08em] ${
+                      approved
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                        : "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                    }`}
+                  >
+                    {attempt.status.replaceAll("_", " ")}
+                  </span>
                 </div>
-                <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-bold ${attempt.status === "APPROVED" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
-                  {attempt.status.replaceAll("_", " ")}
-                </span>
-              </div>
-              <p className="mt-3 text-sm text-slate-600">{attempt.message || "-"}</p>
-              <p className="mt-2 text-xs text-slate-500">{formatIndiaDateTime(attempt.attemptedAt)}</p>
-            </article>
-          ))}
-          {attempts.length === 0 ? <p className="text-sm text-slate-500">No attendance attempts found yet.</p> : null}
+
+                <p className="mt-3 text-xs font-medium leading-5 text-slate-600 dark:text-slate-300">
+                  {attempt.message || "Attendance request recorded."}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold text-slate-400">
+                  <span>{formatIndiaDateTime(attempt.attemptedAt)}</span>
+                  <span>{formatDistance(attempt.distanceMeters)}</span>
+                </div>
+              </article>
+            );
+          })}
+
+          {attempts.length === 0 ? (
+            <div className="col-span-full rounded-2xl border border-dashed border-slate-200 px-6 py-10 text-center text-sm font-semibold text-slate-400 dark:border-white/10">
+              No attendance attempts found yet.
+            </div>
+          ) : null}
         </div>
       </section>
     </div>
