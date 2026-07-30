@@ -15,10 +15,10 @@ function BellIcon() {
     <svg
       aria-hidden="true"
       viewBox="0 0 24 24"
-      className="h-5 w-5"
+      className="h-6 w-6"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.9"
+      strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -148,17 +148,15 @@ export function NotificationPopover({
           setIsOpen((current) => !current);
           requestAnimationFrame(updatePosition);
         }}
-        className={`notification-bell-button relative flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-900 shadow-sm shadow-slate-200/70 transition hover:border-blue-200 hover:bg-slate-50 hover:text-blue-700 dark:border-white/10 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/20 dark:hover:border-blue-500/60 dark:hover:bg-slate-800 dark:hover:text-white ${
-          unreadCount > 0 ? "notification-bell-unread" : ""
-        }`}
+        className="notification-bell-button relative flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-transparent text-slate-700 transition hover:bg-slate-100 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 dark:text-slate-200 dark:hover:bg-white/10 dark:hover:text-white dark:focus-visible:ring-blue-500/20"
       >
         <span className="notification-bell-icon">
           <BellIcon />
         </span>
 
         {unreadCount > 0 ? (
-          <span className="notification-count-badge absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-black leading-none text-white shadow-sm dark:border-slate-900">
-            {unreadCount > 99 ? "99+" : unreadCount}
+          <span className="absolute right-0 top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-black leading-none text-white ring-2 ring-white dark:ring-slate-950">
+            {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         ) : null}
       </button>

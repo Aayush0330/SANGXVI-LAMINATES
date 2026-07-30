@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { announceWorkspaceOverlay } from "@/lib/workspace-overlay";
 
 type OrderDetailsDrawerProps = {
   closeHref: string;
@@ -23,6 +24,8 @@ export function OrderDetailsDrawer({ closeHref, children }: OrderDetailsDrawerPr
 
   useEffect(() => {
     if (!mounted) return;
+
+    announceWorkspaceOverlay("order-details");
 
     const mediaQuery = window.matchMedia("(max-width: 1023px)");
 
@@ -50,7 +53,10 @@ export function OrderDetailsDrawer({ closeHref, children }: OrderDetailsDrawerPr
       />
 
       <aside
-        aria-label="Order Details details"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Order Details"
+        data-workspace-overlay="order-details"
         className="fixed bottom-0 right-0 top-0 z-[100] overflow-y-auto border-l border-slate-200 bg-white shadow-2xl shadow-slate-950/25 lg:top-[88px] dark:border-white/10 dark:bg-slate-950 dark:shadow-black/50"
         style={{ width: "min(420px, 100vw)", maxWidth: "100vw" }}
       >

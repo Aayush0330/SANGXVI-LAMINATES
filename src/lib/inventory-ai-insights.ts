@@ -85,7 +85,6 @@ export type InventoryAiChatAnswer = {
   answer: string;
   bullets: string[];
   sourceFacts: string[];
-  followUpPrompts: string[];
 };
 
 type InventoryAiDataSourceRow = Record<keyof InventoryAiDataSourceStats, unknown>;
@@ -274,17 +273,235 @@ export function getAiTagClass(tag: InventoryAiRecommendation["aiTag"]) {
   return "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300";
 }
 
-function formatProductLine(item: InventoryAiRecommendation) {
-  return `${item.name} (${item.code}) — usable stock ${item.availableStock.toLocaleString("en-IN")}, minimum ${item.minimumStock.toLocaleString("en-IN")}, delivered ${item.deliveredQuantity.toLocaleString("en-IN")}, missed demand ${item.missedSalesDemand.toLocaleString("en-IN")}.`;
+export type InventoryQuestionIntent =
+  | "REORDER"
+  | "MISSED_DEMAND"
+  | "SLOW_STOCK"
+  | "TOP_SELLERS"
+  | "AGING_STOCK"
+  | "SUMMARY";
+
+type InventoryResponseLanguage = "en" | "hi" | "hinglish";
+
+function normalizeQuestion(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function topLines(items: InventoryAiRecommendation[], fallback: string, limit = 3) {
-  const lines = items.slice(0, limit).map(formatProductLine);
+function includesAny(value: string, phrases: string[]) {
+  return phrases.some((phrase) => value.includes(normalizeQuestion(phrase)));
+}
+
+export function detectInventoryQuestionIntent(
+  rawQuestion: string,
+): InventoryQuestionIntent {
+  const q = normalizeQuestion(rawQuestion);
+
+  if (
+    includesAny(q, [
+      "reorder",
+      "restock",
+      "minimum stock",
+      "low stock",
+      "stock kam",
+      "kam stock",
+      "mangwa",
+      "mangva",
+      "mangana",
+      "mangau",
+      "kharid",
+      "dobara stock",
+      "रीऑर्डर",
+      "मंगवा",
+      "मंगाना",
+      "खरीद",
+      "कम स्टॉक",
+      "स्टॉक कम",
+      "न्यूनतम",
+      "reordenar",
+      "reapprovisionner",
+      "إعادة الطلب",
+      "ફરી ઓર્ડર",
+    ])
+  ) {
+    return "REORDER";
+  }
+
+  if (
+    includesAny(q, [
+      "missed demand",
+      "missed sale",
+      "not available",
+      "out of stock",
+      "stock nahi",
+      "available nahi",
+      "nahi mila",
+      "nahi mil",
+      "customer demand",
+      "grahak ki demand",
+      "मांग",
+      "नहीं मिला",
+      "उपलब्ध नहीं",
+      "स्टॉक नहीं",
+      "demanda perdida",
+      "demande manquee",
+      "طلب مفقود",
+      "માંગ",
+    ])
+  ) {
+    return "MISSED_DEMAND";
+  }
+
+  if (
+    includesAny(q, [
+      "not selling",
+      "slow stock",
+      "slow selling",
+      "low selling",
+      "dead stock",
+      "nahi bik",
+      "kam bik",
+      "nahi chal",
+      "pada hua",
+      "नहीं बिक",
+      "कम बिक",
+      "नहीं चल",
+      "डेड स्टॉक",
+      "धीमा स्टॉक",
+      "sin vender",
+      "stock dormant",
+      "مخزون راكد",
+      "નથી વેચાતો",
+    ])
+  ) {
+    return "SLOW_STOCK";
+  }
+
+  if (
+    includesAny(q, [
+      "top seller",
+      "top selling",
+      "best seller",
+      "fast selling",
+      "fast moving",
+      "most sold",
+      "sabse zyada",
+      "sabse jyada",
+      "zyada bik",
+      "jyada bik",
+      "acha chal",
+      "accha chal",
+      "सबसे ज्यादा",
+      "सबसे अधिक",
+      "तेज बिक",
+      "अच्छा चल",
+      "mas vendido",
+      "meilleure vente",
+      "الأكثر مبيعا",
+      "સૌથી વધુ",
+    ])
+  ) {
+    return "TOP_SELLERS";
+  }
+
+  if (
+    includesAny(q, [
+      "oldest",
+      "old stock",
+      "inventory age",
+      "stock age",
+      "how many days",
+      "purana",
+      "kitne din",
+      "kab se",
+      "पुराना",
+      "कितने दिन",
+      "कब से",
+      "स्टॉक की उम्र",
+      "mas antiguo",
+      "plus ancien",
+      "الأقدم",
+      "જૂનો",
+    ])
+  ) {
+    return "AGING_STOCK";
+  }
+
+  return "SUMMARY";
+}
+
+function detectResponseLanguage(rawQuestion: string): InventoryResponseLanguage {
+  if (/[\u0900-\u097f]/.test(rawQuestion)) return "hi";
+
+  const q = ` ${normalizeQuestion(rawQuestion)} `;
+  const hinglishWords = [
+    " kya ",
+    " kaunsa ",
+    " kaun ",
+    " kitna ",
+    " kitne ",
+    " sabse ",
+    " zyada ",
+    " jyada ",
+    " nahi ",
+    " wala ",
+    " wali ",
+    " maal ",
+    " stock kam ",
+    " mangwa",
+    " bik ",
+    " bikta ",
+    " chal raha ",
+    " batao ",
+    " dikhao ",
+  ];
+
+  return hinglishWords.some((word) => q.includes(word)) ? "hinglish" : "en";
+}
+
+function localized(
+  language: InventoryResponseLanguage,
+  copy: Record<InventoryResponseLanguage, string>,
+) {
+  return copy[language];
+}
+
+function formatProductLine(
+  item: InventoryAiRecommendation,
+  language: InventoryResponseLanguage,
+) {
+  const stock = item.availableStock.toLocaleString("en-IN");
+  const minimum = item.minimumStock.toLocaleString("en-IN");
+  const delivered = item.deliveredQuantity.toLocaleString("en-IN");
+  const missed = item.missedSalesDemand.toLocaleString("en-IN");
+
+  return localized(language, {
+    en: `${item.name} (${item.code}) — usable stock ${stock}, minimum ${minimum}, delivered ${delivered}, missed demand ${missed}.`,
+    hi: `${item.name} (${item.code}) — उपयोग योग्य स्टॉक ${stock}, न्यूनतम ${minimum}, डिलीवर ${delivered}, छूटी हुई मांग ${missed}।`,
+    hinglish: `${item.name} (${item.code}) — usable stock ${stock}, minimum ${minimum}, delivered ${delivered}, missed demand ${missed}.`,
+  });
+}
+
+function topLines(
+  items: InventoryAiRecommendation[],
+  fallback: string,
+  language: InventoryResponseLanguage,
+  limit = 3,
+) {
+  const lines = items
+    .slice(0, limit)
+    .map((item) => formatProductLine(item, language));
   return lines.length > 0 ? lines : [fallback];
 }
 
 function findProductFromQuestion(insights: InventoryAiInsights, rawQuestion: string) {
-  const q = rawQuestion.toLowerCase();
+  const q = normalizeQuestion(rawQuestion);
   const words = q.split(/[^a-z0-9]+/).filter((word) => word.length >= 3);
 
   return insights.recommendations.find((item) => {
@@ -296,7 +513,7 @@ function findProductFromQuestion(insights: InventoryAiInsights, rawQuestion: str
     if (q.includes(code) || q.includes(name) || haystack.includes(q)) return true;
 
     const matchingWords = words.filter((word) => haystack.includes(word)).length;
-    return matchingWords >= Math.min(2, words.length);
+    return words.length > 0 && matchingWords >= Math.min(2, words.length);
   });
 }
 
@@ -305,104 +522,211 @@ export function getInventoryAiChatAnswer(
   rawQuestion: string,
 ): InventoryAiChatAnswer {
   const question = rawQuestion.trim().slice(0, 180);
-  const q = question.toLowerCase();
+  const language = detectResponseLanguage(question);
+  const intent = detectInventoryQuestionIntent(question);
   const productMatch = question ? findProductFromQuestion(insights, question) : null;
 
-  const defaultPrompts = [
-    "What should I reorder first?",
-    "Which stock is not selling?",
-    "Show missed demand risk",
-    "Which product is oldest?",
-  ];
-
   const sourceFacts = [
-    `${insights.dataSources.products.toLocaleString("en-IN")} products checked from Product table.`,
-    `${insights.dataSources.orderItems.toLocaleString("en-IN")} order lines and ${insights.dataSources.deliveredUnits.toLocaleString("en-IN")} delivered units checked from OrderItem table.`,
-    `${insights.dataSources.inquiries.toLocaleString("en-IN")} inventory inquiries checked, including ${insights.dataSources.missedSalesInquiries.toLocaleString("en-IN")} missed-sale inquiries.`,
-    `${insights.dataSources.activeBlocks.toLocaleString("en-IN")} active stock block records checked from StockBlockTimeline table.`,
+    localized(language, {
+      en: `${insights.dataSources.products.toLocaleString("en-IN")} products checked from Product records.`,
+      hi: `Product रिकॉर्ड से ${insights.dataSources.products.toLocaleString("en-IN")} प्रोडक्ट जाँचे गए।`,
+      hinglish: `Product records se ${insights.dataSources.products.toLocaleString("en-IN")} products check kiye gaye.`,
+    }),
+    localized(language, {
+      en: `${insights.dataSources.orderItems.toLocaleString("en-IN")} order lines and ${insights.dataSources.deliveredUnits.toLocaleString("en-IN")} delivered units checked.`,
+      hi: `${insights.dataSources.orderItems.toLocaleString("en-IN")} ऑर्डर लाइन और ${insights.dataSources.deliveredUnits.toLocaleString("en-IN")} डिलीवर यूनिट जाँची गईं।`,
+      hinglish: `${insights.dataSources.orderItems.toLocaleString("en-IN")} order lines aur ${insights.dataSources.deliveredUnits.toLocaleString("en-IN")} delivered units check kiye gaye.`,
+    }),
+    localized(language, {
+      en: `${insights.dataSources.inquiries.toLocaleString("en-IN")} inventory inquiries checked, including ${insights.dataSources.missedSalesInquiries.toLocaleString("en-IN")} missed-sale inquiries.`,
+      hi: `${insights.dataSources.inquiries.toLocaleString("en-IN")} इन्वेंटरी इन्क्वायरी जाँची गईं, जिनमें ${insights.dataSources.missedSalesInquiries.toLocaleString("en-IN")} missed-sale इन्क्वायरी हैं।`,
+      hinglish: `${insights.dataSources.inquiries.toLocaleString("en-IN")} inventory inquiries check hui, jisme ${insights.dataSources.missedSalesInquiries.toLocaleString("en-IN")} missed-sale inquiries hain.`,
+    }),
   ];
 
   if (productMatch) {
+    const stock = productMatch.availableStock.toLocaleString("en-IN");
+    const minimum = productMatch.minimumStock.toLocaleString("en-IN");
+    const delivered = productMatch.deliveredQuantity.toLocaleString("en-IN");
+    const missed = productMatch.missedSalesDemand.toLocaleString("en-IN");
+
     return {
-      title: `${productMatch.name} backend analysis`,
-      answer: `${productMatch.aiTitle}. ${productMatch.aiReason}`,
+      title: localized(language, {
+        en: `${productMatch.name} analysis`,
+        hi: `${productMatch.name} का विश्लेषण`,
+        hinglish: `${productMatch.name} ka analysis`,
+      }),
+      answer: localized(language, {
+        en: `${productMatch.aiTitle}. The result is based on live stock, order and inquiry records.`,
+        hi: `${productMatch.aiTitle}। यह नतीजा लाइव स्टॉक, ऑर्डर और इन्क्वायरी रिकॉर्ड पर आधारित है।`,
+        hinglish: `${productMatch.aiTitle}. Ye result live stock, order aur inquiry records par based hai.`,
+      }),
       bullets: [
-        `Usable stock is ${productMatch.availableStock.toLocaleString("en-IN")} units after active blocks. Minimum stock is ${productMatch.minimumStock.toLocaleString("en-IN")}.`,
-        `Delivered units are ${productMatch.deliveredQuantity.toLocaleString("en-IN")}; missed demand is ${productMatch.missedSalesDemand.toLocaleString("en-IN")}.`,
-        `Risk score is ${productMatch.riskScore.toLocaleString("en-IN")} and confidence is ${productMatch.confidence}.`,
-        productMatch.aiAction,
+        localized(language, {
+          en: `Usable stock is ${stock}; minimum stock is ${minimum}.`,
+          hi: `उपयोग योग्य स्टॉक ${stock} है; न्यूनतम स्टॉक ${minimum} है।`,
+          hinglish: `Usable stock ${stock} hai; minimum stock ${minimum} hai.`,
+        }),
+        localized(language, {
+          en: `Delivered units are ${delivered}; missed demand is ${missed}.`,
+          hi: `डिलीवर यूनिट ${delivered} हैं; छूटी हुई मांग ${missed} है।`,
+          hinglish: `Delivered units ${delivered} hain; missed demand ${missed} hai.`,
+        }),
       ],
       sourceFacts: productMatch.evidence,
-      followUpPrompts: defaultPrompts,
     };
   }
 
-  if (q.includes("reorder") || q.includes("minimum") || q.includes("low stock")) {
+  if (intent === "REORDER") {
     return {
-      title: "Reorder priority from database",
-      answer: `${insights.reorderAlerts.length.toLocaleString("en-IN")} products need reorder or minimum-stock review. The ranking is generated from stock, active blocks, order items, and missed-sales inquiries.` ,
+      title: localized(language, {
+        en: "Reorder priority",
+        hi: "रीऑर्डर प्राथमिकता",
+        hinglish: "Reorder priority",
+      }),
+      answer: localized(language, {
+        en: `${insights.reorderAlerts.length.toLocaleString("en-IN")} products need reorder or minimum-stock review.`,
+        hi: `${insights.reorderAlerts.length.toLocaleString("en-IN")} प्रोडक्ट को रीऑर्डर या न्यूनतम स्टॉक समीक्षा की जरूरत है।`,
+        hinglish: `${insights.reorderAlerts.length.toLocaleString("en-IN")} products ko reorder ya minimum-stock review ki zarurat hai.`,
+      }),
       bullets: topLines(
         insights.reorderAlerts,
-        "No urgent reorder item right now. Keep watching missed sales and minimum stock.",
+        localized(language, {
+          en: "No urgent reorder item right now.",
+          hi: "अभी कोई जरूरी रीऑर्डर आइटम नहीं है।",
+          hinglish: "Abhi koi urgent reorder item nahi hai.",
+        }),
+        language,
       ),
       sourceFacts,
-      followUpPrompts: ["Show missed demand risk", "Which product is oldest?", "Which stock is not selling?"],
     };
   }
 
-  if (q.includes("missed") || q.includes("demand") || q.includes("not available") || q.includes("stock not")) {
+  if (intent === "MISSED_DEMAND") {
     const missedItems = insights.recommendations
       .filter((item) => item.missedSalesDemand > 0)
       .sort((a, b) => b.missedSalesDemand - a.missedSalesDemand);
 
     return {
-      title: "Missed demand risk from inquiries",
-      answer: `Total missed demand is ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} units. This value is calculated from InventoryInquiry records tagged as NOT_IN_STOCK or MISSED_SALE.`,
-      bullets: topLines(missedItems, "No missed-sales demand is currently visible."),
+      title: localized(language, {
+        en: "Missed demand risk",
+        hi: "छूटी हुई मांग का जोखिम",
+        hinglish: "Missed demand risk",
+      }),
+      answer: localized(language, {
+        en: `Total missed demand is ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} units.`,
+        hi: `कुल छूटी हुई मांग ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} यूनिट है।`,
+        hinglish: `Total missed demand ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} units hai.`,
+      }),
+      bullets: topLines(
+        missedItems,
+        localized(language, {
+          en: "No missed-sales demand is currently visible.",
+          hi: "अभी कोई छूटी हुई बिक्री की मांग नहीं दिख रही है।",
+          hinglish: "Abhi koi missed-sales demand nahi dikh rahi hai.",
+        }),
+        language,
+      ),
       sourceFacts,
-      followUpPrompts: ["What should I reorder first?", "Which product is oldest?", "Top selling products"],
     };
   }
 
-  if (q.includes("low") || q.includes("slow") || q.includes("dead") || q.includes("not selling")) {
+  if (intent === "SLOW_STOCK") {
     return {
-      title: "Low selling and dead stock from database",
-      answer: "These products have weak order/inquiry signals or old inventory age. Review them before fresh purchasing.",
-      bullets: topLines(insights.lowSellers, "No low-selling or dead-stock risk is visible right now."),
+      title: localized(language, {
+        en: "Slow and dead stock",
+        hi: "धीमा और डेड स्टॉक",
+        hinglish: "Slow aur dead stock",
+      }),
+      answer: localized(language, {
+        en: "These products have weak sales signals or old inventory. Review them before fresh purchasing.",
+        hi: "इन प्रोडक्ट में बिक्री संकेत कमजोर हैं या स्टॉक पुराना है। नई खरीद से पहले समीक्षा करें।",
+        hinglish: "In products ke sales signals weak hain ya stock purana hai. Fresh purchase se pehle review karein.",
+      }),
+      bullets: topLines(
+        insights.lowSellers,
+        localized(language, {
+          en: "No slow-selling or dead-stock risk is visible right now.",
+          hi: "अभी धीमे या डेड स्टॉक का जोखिम नहीं दिख रहा है।",
+          hinglish: "Abhi slow-selling ya dead-stock risk nahi dikh raha hai.",
+        }),
+        language,
+      ),
       sourceFacts,
-      followUpPrompts: ["Which product is oldest?", "Top selling products", "What should I reorder first?"],
     };
   }
 
-  if (q.includes("top") || q.includes("selling") || q.includes("best") || q.includes("fast")) {
+  if (intent === "TOP_SELLERS") {
     return {
-      title: "Top selling products from order data",
-      answer: "These products have the strongest delivered quantity, order quantity, inquiry and missed-demand signals in the current ERP database.",
-      bullets: topLines(insights.topSellers, "No top-selling signal yet. Orders and deliveries will improve this analysis."),
+      title: localized(language, {
+        en: "Top-selling products",
+        hi: "सबसे ज्यादा बिकने वाले प्रोडक्ट",
+        hinglish: "Sabse zyada bikne wale products",
+      }),
+      answer: localized(language, {
+        en: "These products have the strongest order, delivery and inquiry signals.",
+        hi: "इन प्रोडक्ट के ऑर्डर, डिलीवरी और इन्क्वायरी संकेत सबसे मजबूत हैं।",
+        hinglish: "In products ke order, delivery aur inquiry signals sabse strong hain.",
+      }),
+      bullets: topLines(
+        insights.topSellers,
+        localized(language, {
+          en: "There is not enough sales data yet.",
+          hi: "अभी पर्याप्त बिक्री डेटा नहीं है।",
+          hinglish: "Abhi enough sales data nahi hai.",
+        }),
+        language,
+      ),
       sourceFacts,
-      followUpPrompts: ["What should I reorder first?", "Show missed demand risk", "Which stock is not selling?"],
     };
   }
 
-  if (q.includes("old") || q.includes("age") || q.includes("days") || q.includes("oldest")) {
+  if (intent === "AGING_STOCK") {
     return {
-      title: "Oldest inventory from Product records",
-      answer: `Oldest available inventory age is ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} days. The age is calculated from Product.createdAt for available stock.` ,
-      bullets: topLines(insights.agingInventory, "No stock age signal available yet."),
+      title: localized(language, {
+        en: "Oldest inventory",
+        hi: "सबसे पुराना स्टॉक",
+        hinglish: "Sabse purana stock",
+      }),
+      answer: localized(language, {
+        en: `The oldest available inventory is ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} days old.`,
+        hi: `सबसे पुराना उपलब्ध स्टॉक ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} दिन पुराना है।`,
+        hinglish: `Sabse purana available stock ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} din purana hai.`,
+      }),
+      bullets: topLines(
+        insights.agingInventory,
+        localized(language, {
+          en: "No stock-age signal is available yet.",
+          hi: "अभी स्टॉक की उम्र का डेटा उपलब्ध नहीं है।",
+          hinglish: "Abhi stock-age data available nahi hai.",
+        }),
+        language,
+      ),
       sourceFacts,
-      followUpPrompts: ["Which stock is not selling?", "What should I reorder first?", "Show missed demand risk"],
     };
   }
 
   return {
-    title: question ? "Live inventory database summary" : "Ask a backend inventory question",
-    answer: `${insights.stats.productsAnalyzed.toLocaleString("en-IN")} products analyzed. ${insights.stats.reorderNow.toLocaleString("en-IN")} need reorder review, ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} units are missed demand, and oldest stock is ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} days old.` ,
+    title: localized(language, {
+      en: "Live inventory summary",
+      hi: "लाइव इन्वेंटरी सारांश",
+      hinglish: "Live inventory summary",
+    }),
+    answer: localized(language, {
+      en: `${insights.stats.productsAnalyzed.toLocaleString("en-IN")} products analyzed. ${insights.stats.reorderNow.toLocaleString("en-IN")} need reorder review, missed demand is ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} units, and the oldest stock is ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} days old.`,
+      hi: `${insights.stats.productsAnalyzed.toLocaleString("en-IN")} प्रोडक्ट का विश्लेषण हुआ। ${insights.stats.reorderNow.toLocaleString("en-IN")} को रीऑर्डर समीक्षा चाहिए, छूटी हुई मांग ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} यूनिट है और सबसे पुराना स्टॉक ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} दिन पुराना है।`,
+      hinglish: `${insights.stats.productsAnalyzed.toLocaleString("en-IN")} products analyze hue. ${insights.stats.reorderNow.toLocaleString("en-IN")} ko reorder review chahiye, missed demand ${insights.stats.totalMissedDemand.toLocaleString("en-IN")} units hai aur sabse purana stock ${insights.stats.oldestInventoryDays.toLocaleString("en-IN")} din purana hai.`,
+    }),
     bullets: topLines(
       insights.recommendations,
-      "Inventory data is not enough yet. Add products, orders and inquiries to get deeper insights.",
+      localized(language, {
+        en: "There is not enough inventory data yet.",
+        hi: "अभी पर्याप्त इन्वेंटरी डेटा नहीं है।",
+        hinglish: "Abhi enough inventory data nahi hai.",
+      }),
+      language,
     ),
     sourceFacts,
-    followUpPrompts: defaultPrompts,
   };
 }
 
