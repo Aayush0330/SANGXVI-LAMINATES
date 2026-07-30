@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/backup",
-      "schedule": "0 */4 * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/alert-escalation",
@@ -23,7 +23,7 @@
     },
     {
       "path": "/api/cron/google-calendar",
-      "schedule": "*/10 * * * *"
+      "schedule": "15 2 * * *"
     },
     {
       "path": "/api/cron/attendance-close",
