@@ -17,9 +17,16 @@ const preferredHrefs = [
   "/internal/inquiries",
   "/internal/order-receiving",
   "/internal/dispatch",
+  "/internal/delivery-proofs",
+  "/internal/field-locations",
   "/internal/qc",
   "/internal/inventory",
 ];
+
+function getNavigationRank(item: NavigationItem) {
+  const index = preferredHrefs.indexOf(item.href);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/internal/inventory" || href === "/account/tasks") {
@@ -56,21 +63,24 @@ export function InternalMobileNavigation({
 
   const primaryItems = useMemo(() => {
     const ranked = [...items].sort((left, right) => {
-      const leftIndex = preferredHrefs.indexOf(left.href);
-      const rightIndex = preferredHrefs.indexOf(right.href);
-      const safeLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
-      const safeRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
-      return safeLeft - safeRight;
+      return getNavigationRank(left) - getNavigationRank(right);
     });
     return ranked.slice(0, 4);
   }, [items]);
 
   const remainingItems = useMemo(
     () =>
-      items.filter(
-        (item) =>
-          !primaryItems.some((primaryItem) => primaryItem.href === item.href),
-      ),
+      items
+        .filter(
+          (item) =>
+            !primaryItems.some(
+              (primaryItem) => primaryItem.href === item.href,
+            ),
+        )
+        .sort(
+          (left, right) =>
+            getNavigationRank(left) - getNavigationRank(right),
+        ),
     [items, primaryItems],
   );
 

@@ -10,6 +10,22 @@ type SidebarSection = {
   items: NavigationItem[];
 };
 
+const sectionOrder = ["Main", "Operations", "Workforce", "Finance", "Administration"];
+
+const operationsOrder = [
+  "/internal/order-receiving",
+  "/internal/dispatch",
+  "/internal/delivery-proofs",
+  "/internal/field-locations",
+  "/internal/qc",
+  "/internal/transport",
+];
+
+function rankHref(href: string, order: readonly string[]) {
+  const index = order.indexOf(href);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
 function NavIcon({ label }: { label: string }) {
   const normalized = label.toLowerCase();
 
@@ -303,7 +319,20 @@ export function InternalSidebarNav({
 
     accumulator.push({ heading, items: [item] });
     return accumulator;
-  }, []);
+  }, []).sort(
+    (left, right) =>
+      rankHref(left.heading, sectionOrder) -
+      rankHref(right.heading, sectionOrder),
+  );
+
+  const operationsSection = sections.find(
+    (section) => section.heading === "Operations",
+  );
+  operationsSection?.items.sort(
+    (left, right) =>
+      rankHref(left.href, operationsOrder) -
+      rankHref(right.href, operationsOrder),
+  );
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
