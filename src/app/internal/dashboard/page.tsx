@@ -695,7 +695,7 @@ function RecentOrderRow({
   return (
     <Link
       href={order.href}
-      className="group grid gap-3 border-b border-slate-100 px-1 py-4 last:border-0 sm:grid-cols-[minmax(0,1.3fr)_minmax(120px,0.7fr)_auto] sm:items-center dark:border-white/10"
+      className="group grid gap-3 border-b border-slate-100 px-1 py-4 last:border-0 sm:grid-cols-[minmax(180px,1fr)_150px_190px] sm:items-center dark:border-white/10"
     >
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -727,13 +727,15 @@ function RecentOrderRow({
               : "text-slate-400"
           }`}
         >
-          Required {formatShortDate(order.requiredBy)}
+          {order.requiredBy
+            ? `Required ${formatShortDate(order.requiredBy)}`
+            : "Required date not set"}
         </p>
       </div>
 
-      <div className="flex items-center justify-between gap-3 sm:justify-end">
+      <div className="grid grid-cols-[minmax(0,1fr)_16px] items-center gap-3">
         <span
-          className={`rounded-full px-2.5 py-1 text-[10px] font-black ${getLightOrderStatusClass(order.status)}`}
+          className={`justify-self-end whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-black ${getLightOrderStatusClass(order.status)}`}
         >
           {getOrderStatusLabel(order.status)}
         </span>

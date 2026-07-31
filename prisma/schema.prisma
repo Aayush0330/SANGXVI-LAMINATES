@@ -54,6 +54,11 @@ enum FieldVisitStatus {
   CLOSED
 }
 
+enum FieldLocationSessionStatus {
+  ACTIVE
+  STOPPED
+}
+
 enum CollectionStatus {
   ASSIGNED
   ON_THE_WAY
@@ -326,6 +331,8 @@ enum SecurityEventType {
   WORK_TASK_REMINDER_SWEEP
   FIELD_VISIT_CREATED
   FIELD_VISIT_UPDATED
+  FIELD_LOCATION_STARTED
+  FIELD_LOCATION_STOPPED
   COLLECTION_CREATED
   COLLECTION_UPDATED
   COLLECTION_STATUS_CHANGED
@@ -391,6 +398,7 @@ model User {
   deliveryProofCompletions       Order[]                       @relation("DeliveryProofCompletedBy")
   inventoryInquiriesCreated      InventoryInquiry[]            @relation("InventoryInquiryCreatedBy")
   fieldVisitsCreated             FieldVisit[]                  @relation("FieldVisitCreatedBy")
+  fieldLocationSessions          FieldLocationSession[]        @relation("FieldLocationSessionUser")
   workTeamsCreated               WorkTeam[]                    @relation("WorkTeamsCreated")
   workTeamsUpdated               WorkTeam[]                    @relation("WorkTeamsUpdated")
   workTeamMemberships            WorkTeamMember[]              @relation("WorkTeamMemberships")
@@ -1324,6 +1332,46 @@ model FieldVisitPhoto {
   @@index([fieldVisitId])
   @@index([sortOrder])
   @@index([uploadedAt])
+}
+
+model FieldLocationSession {
+  id                 String                     @id @default(cuid())
+  userId             String
+  status             FieldLocationSessionStatus @default(ACTIVE)
+  startedAt          DateTime                   @default(now())
+  endedAt            DateTime?
+  lastLatitude       Float?
+  lastLongitude      Float?
+  lastAccuracyMeters Float?
+  lastHeading        Float?
+  lastSpeedMps       Float?
+  lastRecordedAt     DateTime?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  user   User                 @relation("FieldLocationSessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  points FieldLocationPoint[]
+
+  @@index([userId, status])
+  @@index([status, lastRecordedAt])
+  @@index([startedAt])
+}
+
+model FieldLocationPoint {
+  id             String   @id @default(cuid())
+  sessionId      String
+  latitude       Float
+  longitude      Float
+  accuracyMeters Float
+  heading        Float?
+  speedMps       Float?
+  capturedAt     DateTime
+  receivedAt     DateTime @default(now())
+
+  session FieldLocationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, capturedAt])
+  @@index([receivedAt])
 }
 
 model TransportOption {

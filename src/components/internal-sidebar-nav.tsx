@@ -235,6 +235,7 @@ function getSidebarHeading(item: NavigationItem, financeMode: boolean) {
       "/internal/delivery-proofs",
       "/internal/collections",
       "/internal/field-visits",
+      "/internal/field-locations",
       "/internal/qc",
     ].includes(item.href)
   ) {
@@ -262,6 +263,8 @@ function getSidebarLabel(item: NavigationItem, financeMode: boolean) {
       return "Physical Checks";
     case "/internal/field-visits":
       return "Field Reports";
+    case "/internal/field-locations":
+      return "Live Locations";
     case "/internal/qc":
       return "QC & Delivery";
     case "/internal/users/dealer-members":

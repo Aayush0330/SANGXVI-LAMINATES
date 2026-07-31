@@ -36,6 +36,7 @@ function getModuleGroup(item: NavigationItem) {
     item.href.includes("transport") ||
     item.href.includes("delivery") ||
     item.href.includes("collections") ||
+    item.href.includes("field-location") ||
     item.href.includes("reorder")
   ) {
     return "Operations";
@@ -47,6 +48,7 @@ function getModuleIcon(item: NavigationItem): ErpIconName {
   if (item.href.includes("inventory")) return "inventory";
   if (item.href.includes("order")) return "orders";
   if (item.href.includes("collection")) return "collection";
+  if (item.href.includes("field-location")) return "delivery";
   if (item.href.includes("task")) return "tasks";
   if (item.href.includes("attendance") || item.href.includes("payroll")) {
     return "calendar";

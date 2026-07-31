@@ -57,7 +57,9 @@ export type Permission =
   | "manage_delivery_proofs"
   | "manage_collections"
   | "manage_field_visits"
-  | "view_field_visit_reports";
+  | "view_field_visit_reports"
+  | "share_live_location"
+  | "view_live_locations";
 
 export const roleLabels: Record<UserRole, string> = {
   owner: "Owner",
@@ -131,6 +133,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "manage_collections",
     "manage_field_visits",
     "view_field_visit_reports",
+    "view_live_locations",
   ],
   manager: [
     "view_internal_dashboard",
@@ -163,6 +166,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "create_internal_dealer_orders",
     "view_order_journey",
     "view_field_visit_reports",
+    "view_live_locations",
     "view_own_payslips",
     "manage_hr",
     "view_hr_reports",
@@ -222,6 +226,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "view_assigned_deliveries",
     "update_delivery_status",
     "upload_delivery_proof",
+    "share_live_location",
   ],
   collection_team: [
     "view_alert_center",
@@ -231,6 +236,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "manage_collections",
     "view_dealer_directory",
     "upload_delivery_proof",
+    "share_live_location",
   ],
   sales_field_team: [
     "view_alert_center",
@@ -241,6 +247,7 @@ export const rolePermissions: Record<UserRole, Permission[]> = {
     "manage_field_visits",
     "view_dealer_directory",
     "create_internal_dealer_orders",
+    "share_live_location",
   ],
   dealer: ["view_dealer_products", "place_dealer_order", "track_dealer_orders"],
 };

@@ -1,8 +1,11 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { BrandLogo } from "@/components/brand-logo";
 import { PasswordInput } from "@/components/password-input";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { getAuthenticatedEntryPath } from "@/lib/auth-entry";
 import { prisma } from "@/lib/db";
+import { getCurrentSession } from "@/lib/session";
 import { loginAction } from "./actions";
 
 function getLoginMessage(error?: string) {
@@ -51,6 +54,12 @@ export default async function LoginPage({
     error?: string;
   }>;
 }) {
+  const session = await getCurrentSession();
+
+  if (session) {
+    redirect(getAuthenticatedEntryPath(session.user));
+  }
+
   const params = await searchParams;
   const message = getLoginMessage(params?.error);
   const ownerCount = await prisma.user.count({

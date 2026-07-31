@@ -152,6 +152,11 @@ export const internalNavigation: NavigationItem[] = [
     href: "/internal/field-visits",
     permission: "view_field_visit_reports",
   },
+  {
+    label: "Live Locations",
+    href: "/internal/field-locations",
+    permission: "view_live_locations",
+  },
 
   // Administration: configuration, access, reporting and recovery.
   {
@@ -259,5 +264,10 @@ export const fieldNavigation: NavigationItem[] = [
     label: "Visits",
     href: "/field/visits",
     permission: "manage_field_visits",
+  },
+  {
+    label: "Live Location",
+    href: "/field/location",
+    permission: "share_live_location",
   },
 ];

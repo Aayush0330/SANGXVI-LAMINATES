@@ -12,6 +12,7 @@ const itemOrder = [
   "/field/deliveries",
   "/field/collections",
   "/field/visits",
+  "/field/location",
   "/internal/dealers",
   "/internal/inquiries",
   "/account/tasks",

@@ -9,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
 // Increment whenever the generated Prisma schema gains or removes delegates.
 // This prevents Next.js Fast Refresh from reusing a client created from the
 // previous generated schema (for example, before Supplier was introduced).
-const PRISMA_POOL_VERSION = 21;
+const PRISMA_POOL_VERSION = 22;
 
 function boundedInteger(
   value: string | undefined,
