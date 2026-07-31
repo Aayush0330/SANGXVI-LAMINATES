@@ -27,6 +27,16 @@ const acceptedHistoricalChecksumTransitions: Record<
   string,
   HistoricalChecksumTransition[]
 > = {
+  "20260628000000_postgres_init": [
+    {
+      appliedChecksum:
+        "e0f64f41bdc3572c68ccadde05f20b20fa114fee82bfa166e5713af105ddf15b",
+      localChecksum:
+        "697fd47921a344ac05bcd0542aaaa828a9eff800b64f9a059d7a6cde29a193e9",
+      reason:
+        "Original production bootstrap followed by repository initialization hardening; both versions are preserved in Git history.",
+    },
+  ],
   "20260716130000_dispatch_assignment_workflow": [
     {
       appliedChecksum:
@@ -35,6 +45,16 @@ const acceptedHistoricalChecksumTransitions: Record<
         "9dfe14aeeb4934d00b414d157c34966a040fffdd04c013012ea5d551863afec8",
       reason:
         "Original production migration followed by fresh-database source hardening.",
+    },
+  ],
+  "20260718210000_phase2_integrity_pricing_cancellation": [
+    {
+      appliedChecksum:
+        "89e13b367c5473c9e6607a2d914e7ada745972c437c298f5b29f98f7700af98f",
+      localChecksum:
+        "7433c5f1d18195fc2c96231af6c6bb8edac30de31fd00ffd6d30d2046c0a28ca",
+      reason:
+        "Original production pricing migration followed by the verified legacy-pricing recovery revision; both versions are preserved in Git history.",
     },
   ],
 };
@@ -141,7 +161,9 @@ export async function assertAppliedMigrationIntegrity() {
             `Accepted verified historical migration transition: ${migration.migrationName}. ${transition?.reason ?? ""}`,
           );
         } else {
-          problems.push(`${migration.migrationName} (checksum mismatch)`);
+          problems.push(
+            `${migration.migrationName} (checksum mismatch: applied=${migration.checksum}, local=${localChecksum})`,
+          );
         }
       }
     }
