@@ -133,8 +133,9 @@ export async function WorkspaceAppShell({
 
   const internalRole =
     getPortalRole(currentUser.roles, "internal") ?? currentUser.role;
-  const allowedMenuItems = internalNavigation.filter((item) =>
-    hasPermission(currentUser.roles, item.permission),
+  const allowedMenuItems = internalNavigation.filter(
+    (item) =>
+      !item.hidden && hasPermission(currentUser.roles, item.permission),
   );
   const isAccountantFocused =
     currentUser.roles.includes("accountant") &&

@@ -4,6 +4,7 @@ export type NavigationItem = {
   label: string;
   href: string;
   permission: Permission;
+  hidden?: boolean;
 };
 
 export const internalNavigation: NavigationItem[] = [
@@ -79,11 +80,13 @@ export const internalNavigation: NavigationItem[] = [
     label: "HR Center",
     href: "/internal/hr",
     permission: "manage_hr",
+    hidden: true,
   },
   {
     label: "HR Reports",
     href: "/internal/hr/reports",
     permission: "view_hr_reports",
+    hidden: true,
   },
   {
     label: "Office Setup",
