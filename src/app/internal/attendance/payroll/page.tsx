@@ -530,7 +530,7 @@ export default async function AttendancePayrollPage({
 
         <aside
           id="salary-structure"
-          className="rounded-[28px] border border-slate-200/90 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-slate-900 xl:sticky xl:top-4"
+          className="scroll-mt-24 rounded-[28px] border border-slate-200/90 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-slate-900 xl:sticky xl:top-[88px] xl:max-h-[calc(100vh-104px)] xl:self-start xl:overflow-y-auto xl:overscroll-contain xl:[scrollbar-gutter:stable] xl:[scrollbar-width:thin]"
         >
           <div className="flex items-start justify-between gap-4">
             <div>
