@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/current-user";
 import { createSecurityAuditLog } from "@/lib/security-audit";
+import { clearCurrentAuthCookies } from "@/lib/session";
 import {
   calculateDistanceMeters,
   canUseOfficeAttendance,
@@ -646,6 +647,10 @@ export async function submitAttendancePunchAction(formData: FormData) {
         insideGeofence,
         photoDataUrl: null,
       });
+
+      await tx.authSession.deleteMany({
+        where: { userId: currentUser.id },
+      });
     });
   } catch (error) {
     if (error instanceof AttendanceStateError) {
@@ -661,5 +666,14 @@ export async function submitAttendancePunchAction(formData: FormData) {
     description: message,
   });
 
-  redirect("/account/attendance?success=punched-out");
+  await createSecurityAuditLog({
+    eventType: "LOGOUT",
+    user: currentUser,
+    path: "/account/attendance",
+    description:
+      "User was automatically logged out from all devices after a successful Punch Out.",
+  });
+
+  await clearCurrentAuthCookies();
+  redirect("/login?success=punched-out");
 }

@@ -8,7 +8,14 @@ import { prisma } from "@/lib/db";
 import { getCurrentSession } from "@/lib/session";
 import { loginAction } from "./actions";
 
-function getLoginMessage(error?: string) {
+function getLoginMessage(error?: string, success?: string) {
+  if (success === "punched-out") {
+    return {
+      type: "success",
+      text: "Punch Out saved successfully. You have been logged out from all devices.",
+    };
+  }
+
   if (error === "invalid-credentials") {
     return {
       type: "error",
@@ -52,6 +59,7 @@ export default async function LoginPage({
 }: {
   searchParams?: Promise<{
     error?: string;
+    success?: string;
   }>;
 }) {
   const session = await getCurrentSession();
@@ -61,7 +69,7 @@ export default async function LoginPage({
   }
 
   const params = await searchParams;
-  const message = getLoginMessage(params?.error);
+  const message = getLoginMessage(params?.error, params?.success);
   const ownerCount = await prisma.user.count({
     where: {
       OR: [

@@ -153,6 +153,11 @@ export async function deleteCurrentAuthSession() {
     });
   }
 
+  await clearCurrentAuthCookies();
+}
+
+export async function clearCurrentAuthCookies() {
+  const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE_NAME);
   cookieStore.delete(FORCE_PASSWORD_CHANGE_COOKIE_NAME);
   cookieStore.delete(LEGACY_USER_COOKIE_NAME);
