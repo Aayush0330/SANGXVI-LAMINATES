@@ -93,6 +93,14 @@ export type AttendanceAttemptRow = {
   attemptedAt: Date | string;
 };
 
+export type EmployeeSessionEventRow = {
+  id: string;
+  userId: string;
+  eventType: "LOGIN_SUCCESS" | "LOGOUT" | string;
+  description: string | null;
+  createdAt: Date | string;
+};
+
 const employeeRoles: UserRole[] = [
   "owner",
   "manager",
@@ -342,6 +350,25 @@ export async function getAttendanceEventsForDate(workDate: string) {
     INNER JOIN public."OfficeAttendance" a ON a."id" = e."attendanceId"
     WHERE a."workDate" = ${workDate}
     ORDER BY e."createdAt" ASC
+  `;
+}
+
+export async function getEmployeeSessionEventsForDate(workDate: string) {
+  return prisma.$queryRaw<EmployeeSessionEventRow[]>`
+    SELECT
+      log."id",
+      log."userId",
+      log."eventType"::text AS "eventType",
+      log."description",
+      log."createdAt"
+    FROM public."SecurityAuditLog" log
+    WHERE log."userId" IS NOT NULL
+      AND log."eventType" IN (
+        'LOGIN_SUCCESS'::public."SecurityEventType",
+        'LOGOUT'::public."SecurityEventType"
+      )
+      AND (log."createdAt" AT TIME ZONE 'Asia/Kolkata')::date = ${workDate}::date
+    ORDER BY log."createdAt" ASC
   `;
 }
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
+import { ReportExportButtons } from "@/components/report-export-buttons";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { clearAllSecurityLogsAction, clearOldSecurityLogsAction } from "./actions";
@@ -444,12 +445,7 @@ export default async function SecurityLogsPage({
             </p>
 
             <div className="mt-4 grid gap-3">
-              <Link
-                href={exportHref}
-                className="inline-flex h-12 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-5 text-sm font-black text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-300 dark:hover:bg-emerald-400/20"
-              >
-                Export CSV
-              </Link>
+              <ReportExportButtons href={exportHref} />
 
               <form action={clearOldSecurityLogsAction}>
                 <button
@@ -465,7 +461,7 @@ export default async function SecurityLogsPage({
                   Danger Zone
                 </p>
                 <p className="mt-2 text-sm font-bold leading-6 text-rose-700 dark:text-rose-200">
-                  This permanently clears all previous security log records. Export CSV before using this action.
+                  This permanently clears all previous security log records. Export PDF or Excel before using this action.
                 </p>
                 <form action={clearAllSecurityLogsAction} className="mt-4">
                   <button

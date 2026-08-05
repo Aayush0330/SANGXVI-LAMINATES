@@ -4,10 +4,9 @@ import { getCurrentSession } from "@/lib/session";
 import { getAppRolesFromUser } from "@/lib/user-role-utils";
 import { getMonthKey, isValidMonthKey, type DecimalLike, toMoneyNumber } from "@/lib/attendance-payroll";
 import { prisma } from "@/lib/db";
+import { createReportDownloadResponse, getReportFormat } from "@/lib/report-export";
 
 type Row = { name: string; email: string; phone: string | null; status: string; userRole: string; employeeCode: string | null; department: string | null; designation: string | null; employmentType: string | null; joiningDate: string | null; probationEndDate: string | null; reportingManagerName: string | null; lastWorkingDate: string | null; monthlyBaseSalary: DecimalLike; monthlyAllowance: DecimalLike; monthlyDeduction: DecimalLike; paymentStatus: string | null; netPay: DecimalLike; paidAt: Date | string | null; paymentReference: string | null };
-function cell(value: unknown) { let text = String(value ?? ""); if (/^[=+\-@]/.test(text)) text = `'${text}`; return `"${text.replaceAll('"', '""')}"`; }
-
 export async function GET(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
@@ -30,7 +29,16 @@ export async function GET(request: NextRequest) {
     WHERE u."role"::text <> 'DEALER' OR EXISTS (SELECT 1 FROM public."UserRoleAssignment" a WHERE a."userId" = u."id" AND a."role"::text <> 'DEALER')
     ORDER BY u."name" ASC
   `;
-  const table: unknown[][] = [["Month", "Employee", "Email", "Phone", "Account Status", "Role", "Employee Code", "Department", "Designation", "Employment Type", "Joining Date", "Probation End", "Reporting Manager", "Last Working Date", "Monthly Base", "Monthly Allowance", "Fixed Deduction", "Payroll Payment Status", "Net Pay", "Paid At", "Payment Reference"], ...rows.map((row) => [monthKey, row.name, row.email, row.phone, row.status, row.userRole, row.employeeCode, row.department, row.designation, row.employmentType, row.joiningDate, row.probationEndDate, row.reportingManagerName, row.lastWorkingDate, toMoneyNumber(row.monthlyBaseSalary).toFixed(2), toMoneyNumber(row.monthlyAllowance).toFixed(2), toMoneyNumber(row.monthlyDeduction).toFixed(2), row.paymentStatus, toMoneyNumber(row.netPay).toFixed(2), row.paidAt ? new Date(row.paidAt).toISOString() : "", row.paymentReference])];
-  const csv = `\uFEFF${table.map((row) => row.map(cell).join(",")).join("\r\n")}`;
-  return new NextResponse(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="hr-workforce-${monthKey}.csv"`, "Cache-Control": "no-store" } });
+  const columns = ["Month", "Employee", "Email", "Phone", "Account Status", "Role", "Employee Code", "Department", "Designation", "Employment Type", "Joining Date", "Probation End", "Reporting Manager", "Last Working Date", "Monthly Base", "Monthly Allowance", "Fixed Deduction", "Payroll Payment Status", "Net Pay", "Paid At", "Payment Reference"];
+  const reportRows = rows.map((row) => [monthKey, row.name, row.email, row.phone, row.status, row.userRole, row.employeeCode, row.department, row.designation, row.employmentType, row.joiningDate, row.probationEndDate, row.reportingManagerName, row.lastWorkingDate, toMoneyNumber(row.monthlyBaseSalary), toMoneyNumber(row.monthlyAllowance), toMoneyNumber(row.monthlyDeduction), row.paymentStatus, toMoneyNumber(row.netPay), row.paidAt ? new Date(row.paidAt).toISOString() : "", row.paymentReference]);
+  return createReportDownloadResponse(
+    getReportFormat(request.nextUrl.searchParams.get("format")),
+    {
+      title: "HR and Workforce Report",
+      subtitle: `Month: ${monthKey}`,
+      fileName: `hr-workforce-${monthKey}`,
+      columns,
+      rows: reportRows,
+    },
+  );
 }

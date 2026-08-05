@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
+import { ReportExportButtons } from "@/components/report-export-buttons";
 import {
   PaymentStatusBadge,
   PayrollMetricCard,
@@ -263,12 +264,10 @@ export default async function AttendancePayrollPage({
             >
               Attendance Summary
             </Link>
-            <Link
+            <ReportExportButtons
               href={`/internal/attendance/payroll/export?month=${monthKey}`}
-              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-black text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-            >
-              Export CSV
-            </Link>
+              compact
+            />
             <Link
               href={`/internal/attendance/payroll/payslips?month=${monthKey}`}
               className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-3.5 text-xs font-black text-white transition hover:bg-blue-700 dark:bg-white dark:text-slate-950 dark:hover:bg-blue-50"

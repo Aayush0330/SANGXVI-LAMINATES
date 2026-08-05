@@ -5,6 +5,11 @@ import { hasPermission } from "@/lib/permissions";
 import { getOrdersWithRelations } from "@/lib/order-queries";
 import { InventoryInquiryStatus } from "@/generated/prisma/client";
 import { getAppRolesFromUser } from "@/lib/user-role-utils";
+import {
+  createReportDownloadResponse,
+  getReportFormat,
+  type ReportCell,
+} from "@/lib/report-export";
 
 type ReportType =
   | "overview"
@@ -45,11 +50,6 @@ function matchesQuery(values: Array<string | null | undefined>, query: string) {
   return values.filter(Boolean).join(" ").toLowerCase().includes(query.toLowerCase());
 }
 
-function csvEscape(value: string | number | null | undefined) {
-  const text = value === null || value === undefined ? "" : String(value);
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
 function formatDateTime(date: Date | null | undefined) {
   if (!date) return "";
   return new Intl.DateTimeFormat("en-IN", {
@@ -61,20 +61,6 @@ function formatDateTime(date: Date | null | undefined) {
     minute: "2-digit",
     hour12: true,
   }).format(date);
-}
-
-function makeCsv(rows: Array<Array<string | number | null | undefined>>) {
-  return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
-}
-
-function csvResponse(csv: string, fileName: string) {
-  return new NextResponse(csv, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${fileName}"`,
-    },
-  });
 }
 
 export async function GET(request: NextRequest) {
@@ -336,30 +322,38 @@ export async function GET(request: NextRequest) {
       formatDateTime(user.updatedAt),
     ]);
 
-  let rows: Array<Array<string | number | null | undefined>> = [];
-  let fileName = "sanghvi-report.csv";
+  let rows: ReportCell[][] = [];
+  let fileName = "sanghvi-report";
+  let title = "Sanghvi ERP Business Report";
 
   if (reportType === "orders") {
     rows = [["Type", "Order Number", "Status", "Dealer", "Dealer Email", "Items", "Total Qty", "Subtotal", "Tax", "Order Total", "Frozen Price Lines", "Created At"], ...orderRows];
-    fileName = "sanghvi-orders-report.csv";
+    fileName = "sanghvi-orders-report";
+    title = "Orders Report";
   } else if (reportType === "inventory") {
     rows = [["Type", "Code", "Product", "Category", "Brand / Company", "Stack", "Unit", "Status", "Available", "Blocked", "Minimum", "Maximum", "Suggested Reorder", "Updated At"], ...productRows];
-    fileName = "sanghvi-inventory-report.csv";
+    fileName = "sanghvi-inventory-report";
+    title = "Inventory Report";
   } else if (reportType === "inquiries") {
     rows = [["Type", "Inquiry Number", "Status", "Product", "Product Code", "Quantity Asked", "Dealer", "Customer", "Customer Phone", "Source", "Order Number", "Description", "Missed Sale", "Next Follow Up", "Created At"], ...inquiryRows];
-    fileName = "sanghvi-inquiries-missed-sales-report.csv";
+    fileName = "sanghvi-inquiries-missed-sales-report";
+    title = "Inquiries and Missed Sales Report";
   } else if (reportType === "collections") {
     rows = [["Type", "Collection Number", "Status", "Dealer/Customer", "Assigned To", "Amount To Collect", "Amount Collected", "Pending", "Payment Mode", "Due At", "Created At"], ...collectionRows];
-    fileName = "sanghvi-collections-report.csv";
+    fileName = "sanghvi-collections-report";
+    title = "Collections Report";
   } else if (reportType === "field-visits") {
     rows = [["Type", "Visit Number", "Status", "Shop", "Dealer", "Contact Person", "Contact Phone", "Created By", "Next Follow Up", "Created At"], ...fieldVisitRows];
-    fileName = "sanghvi-field-visits-report.csv";
+    fileName = "sanghvi-field-visits-report";
+    title = "Field Visits Report";
   } else if (reportType === "tasks") {
     rows = [["Type", "Task Number", "Title", "Status", "Priority", "Task Type", "Team", "Assignee", "Related Module", "Related Reference", "Calendar Status", "Due At", "Created At"], ...taskRows];
-    fileName = "sanghvi-tasks-report.csv";
+    fileName = "sanghvi-tasks-report";
+    title = "Tasks Report";
   } else if (reportType === "users") {
     rows = [["Type", "Name", "Email", "Phone", "Role", "Status", "Must Change Password", "Created At", "Updated At"], ...userRows];
-    fileName = "sanghvi-users-report.csv";
+    fileName = "sanghvi-users-report";
+    title = "Users Report";
   } else {
     rows = [
       ["Report", "Field 1", "Field 2", "Field 3", "Field 4", "Field 5", "Field 6", "Field 7", "Field 8", "Field 9", "Field 10", "Field 11", "Field 12", "Field 13"],
@@ -371,8 +365,19 @@ export async function GET(request: NextRequest) {
       ...taskRows,
       ...userRows,
     ];
-    fileName = "sanghvi-overview-report.csv";
+    fileName = "sanghvi-overview-report";
+    title = "Business Overview Report";
   }
 
-  return csvResponse(makeCsv(rows), fileName);
+  const [columns = [], ...dataRows] = rows;
+  return createReportDownloadResponse(
+    getReportFormat(request.nextUrl.searchParams.get("format")),
+    {
+      title,
+      subtitle: `Range: ${range === "all" ? "All records" : `Last ${range} days`} | Status: ${selectedStatus}`,
+      fileName,
+      columns: columns.map((column) => String(column ?? "")),
+      rows: dataRows,
+    },
+  );
 }

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { ReportExportButtons } from "@/components/report-export-buttons";
 import { AccessDeniedCard } from "@/components/access-denied-card";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
@@ -396,12 +397,7 @@ export default async function ReportsPage({
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Link
-              href={exportHref}
-              className="rounded-2xl border border-emerald-300 bg-emerald-50 px-5 py-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-300 dark:hover:bg-emerald-400/20"
-            >
-              Export CSV
-            </Link>
+            <ReportExportButtons href={exportHref} />
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
               {rangeLabel} · IST
             </div>
@@ -467,7 +463,7 @@ export default async function ReportsPage({
         <StatCard label="Field Visits" value={String(filteredFieldVisits.length)} note="Shop/dealer visit reports" tone="info" />
         <StatCard label="Open Tasks" value={String(openTasks.length)} note={`${blockedTasks.length} blockers`} tone={blockedTasks.length ? "danger" : "success"} />
         <StatCard label="Users" value={String(filteredUsers.length)} note={`${activeUsers.length} active users`} />
-        <StatCard label="Report Rows" value={String(reportType === "orders" ? filteredOrders.length : reportType === "inventory" ? filteredProducts.length : reportType === "inquiries" ? filteredInquiries.length : reportType === "collections" ? filteredCollections.length : reportType === "field-visits" ? filteredFieldVisits.length : reportType === "tasks" ? filteredTasks.length : reportType === "users" ? filteredUsers.length : filteredOrders.length + filteredProducts.length + filteredInquiries.length + filteredCollections.length + filteredFieldVisits.length + filteredTasks.length + filteredUsers.length)} note="Available in CSV export" />
+        <StatCard label="Report Rows" value={String(reportType === "orders" ? filteredOrders.length : reportType === "inventory" ? filteredProducts.length : reportType === "inquiries" ? filteredInquiries.length : reportType === "collections" ? filteredCollections.length : reportType === "field-visits" ? filteredFieldVisits.length : reportType === "tasks" ? filteredTasks.length : reportType === "users" ? filteredUsers.length : filteredOrders.length + filteredProducts.length + filteredInquiries.length + filteredCollections.length + filteredFieldVisits.length + filteredTasks.length + filteredUsers.length)} note="Available in PDF and Excel" />
       </section>
 
       {(reportType === "overview" || reportType === "orders") && (

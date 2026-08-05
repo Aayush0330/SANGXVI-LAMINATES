@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
+import { ReportExportButtons } from "@/components/report-export-buttons";
 import { checkPermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { getOrderSourceLabel } from "@/lib/dealer-directory";
@@ -274,12 +275,7 @@ export default async function OrderJourneyPage({
               problems, decisions, QC, transport, delivery and evidence.
             </p>
           </div>
-          <Link
-            href={exportHref}
-            className="w-fit rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-700 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200"
-          >
-            Export Audit CSV
-          </Link>
+          <ReportExportButtons href={exportHref} />
         </div>
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           {[

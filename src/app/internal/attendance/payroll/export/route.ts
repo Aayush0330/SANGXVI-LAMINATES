@@ -10,12 +10,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { getCurrentSession } from "@/lib/session";
 import { getAppRolesFromUser } from "@/lib/user-role-utils";
-
-function csvCell(value: string | number) {
-  let text = String(value);
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `"${text.replaceAll('"', '""')}"`;
-}
+import { createReportDownloadResponse, getReportFormat } from "@/lib/report-export";
 
 export async function GET(request: NextRequest) {
   const session = await getCurrentSession();
@@ -27,8 +22,7 @@ export async function GET(request: NextRequest) {
   const requestedMonth = request.nextUrl.searchParams.get("month");
   const monthKey = isValidMonthKey(requestedMonth) ? requestedMonth! : getMonthKey();
   const payroll = await getPayrollSummary(monthKey);
-  const rows: Array<Array<string | number>> = [
-    [
+  const columns = [
       "Month", "Payroll Status", "Employee", "Email", "Role",
       "Monthly Base", "Monthly Allowance", "Total Monthly Earnings",
       "Fixed Monthly Deduction", "Per Day", "Full Days", "Half Days",
@@ -36,8 +30,8 @@ export async function GET(request: NextRequest) {
       "Total Payable Days", "Approved OT Minutes", "Gross Salary", "Overtime Pay",
       "Advance Deduction", "Net Pay", "Payment Status", "Paid At", "Paid By",
       "Payment Reference", "Payment Note",
-    ],
-    ...payroll.summary.map((row) => [
+    ];
+  const rows = payroll.summary.map((row) => [
       monthKey,
       payroll.payrollRun?.status === "FINALIZED" ? "Finalized" : "Estimated",
       row.userName,
@@ -65,15 +59,16 @@ export async function GET(request: NextRequest) {
       row.paidByName ?? "",
       row.paymentReference ?? "",
       row.paymentNote ?? "",
-    ]),
-  ];
+    ]);
 
-  const csv = `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
-  return new NextResponse(csv, {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="payroll-${monthKey}.csv"`,
-      "Cache-Control": "no-store",
+  return createReportDownloadResponse(
+    getReportFormat(request.nextUrl.searchParams.get("format")),
+    {
+      title: "Payroll Report",
+      subtitle: `Month: ${monthKey} | Status: ${payroll.payrollRun?.status === "FINALIZED" ? "Finalized" : "Estimated"}`,
+      fileName: `payroll-${monthKey}`,
+      columns,
+      rows,
     },
-  });
+  );
 }

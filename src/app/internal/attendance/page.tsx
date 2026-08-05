@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { AccessDeniedCard } from "@/components/access-denied-card";
+import { ReportExportButtons } from "@/components/report-export-buttons";
 import { checkPermission } from "@/lib/auth-guards";
 import { markStaleAttendanceForReview } from "@/lib/attendance-reconciliation";
 import {
@@ -10,12 +11,14 @@ import {
   getActiveOfficeLocation,
   getAttendanceActionLabel,
   getAttendanceEventsForDate,
+  getEmployeeSessionEventsForDate,
   getBreakTypeLabel,
   getEmployeeAttendanceRows,
   getIndiaWorkDate,
   getRecentAttendanceAttempts,
   type EmployeeAttendanceRow,
   type OfficeAttendanceEventRow,
+  type EmployeeSessionEventRow,
 } from "@/lib/office-attendance";
 import { correctAttendanceAction } from "./actions";
 
@@ -47,6 +50,14 @@ function getStatusClass(label: string) {
   return "bg-slate-100 text-slate-600 ring-slate-500/10 dark:bg-white/10 dark:text-slate-300 dark:ring-white/10";
 }
 
+function getStatusFilterValue(row: EmployeeAttendanceRow) {
+  if (row.status === "REVIEW_REQUIRED") return "REVIEW_REQUIRED";
+  if (row.punchOutAt || row.status === "COMPLETED") return "COMPLETED";
+  if (row.currentBreakType) return "ON_BREAK";
+  if (row.punchInAt) return "WORKING";
+  return "NOT_PUNCHED";
+}
+
 function groupEventsByAttendance(events: OfficeAttendanceEventRow[]) {
   const eventMap = new Map<string, OfficeAttendanceEventRow[]>();
 
@@ -57,6 +68,24 @@ function groupEventsByAttendance(events: OfficeAttendanceEventRow[]) {
   }
 
   return eventMap;
+}
+
+function groupSessionEventsByUser(events: EmployeeSessionEventRow[]) {
+  const eventMap = new Map<string, EmployeeSessionEventRow[]>();
+  for (const event of events) {
+    const currentEvents = eventMap.get(event.userId) || [];
+    currentEvents.push(event);
+    eventMap.set(event.userId, currentEvents);
+  }
+  return eventMap;
+}
+
+function getSessionEventLabel(event: EmployeeSessionEventRow) {
+  if (event.eventType === "LOGIN_SUCCESS") return "Login";
+  if (event.description?.toLowerCase().includes("all devices")) {
+    return "Automatic Logout - All Devices";
+  }
+  return "Logout";
 }
 
 function isValidWorkDate(value: string) {
@@ -270,6 +299,8 @@ export default async function InternalAttendancePage({
 }: {
   searchParams?: Promise<{
     date?: string;
+    employee?: string;
+    status?: string;
     error?: string;
     success?: string;
   }>;
@@ -296,11 +327,25 @@ export default async function InternalAttendancePage({
     params?.date && isValidWorkDate(params.date)
       ? params.date
       : getIndiaWorkDate();
-  const office = await getActiveOfficeLocation();
-  const rows = await getEmployeeAttendanceRows(selectedDate);
-  const events = await getAttendanceEventsForDate(selectedDate);
+  const [office, rows, events, sessionEvents, attempts] = await Promise.all([
+    getActiveOfficeLocation(),
+    getEmployeeAttendanceRows(selectedDate),
+    getAttendanceEventsForDate(selectedDate),
+    getEmployeeSessionEventsForDate(selectedDate),
+    getRecentAttendanceAttempts(20),
+  ]);
   const eventMap = groupEventsByAttendance(events);
-  const attempts = await getRecentAttendanceAttempts(20);
+  const sessionEventMap = groupSessionEventsByUser(sessionEvents);
+  const selectedEmployee = params?.employee || "ALL";
+  const allowedStatuses = new Set(["ALL", "COMPLETED", "WORKING", "ON_BREAK", "NOT_PUNCHED", "REVIEW_REQUIRED"]);
+  const selectedStatus = allowedStatuses.has(params?.status || "ALL")
+    ? params?.status || "ALL"
+    : "ALL";
+  const filteredRows = rows.filter((row) =>
+    (selectedEmployee === "ALL" || row.userId === selectedEmployee) &&
+    (selectedStatus === "ALL" || getStatusFilterValue(row) === selectedStatus),
+  );
+  const exportHref = `/internal/attendance/export?date=${encodeURIComponent(selectedDate)}&employee=${encodeURIComponent(selectedEmployee)}&status=${encodeURIComponent(selectedStatus)}`;
 
   const completedCount = rows.filter(
     (row) => row.punchOutAt || row.status === "COMPLETED",
@@ -327,11 +372,11 @@ export default async function InternalAttendancePage({
               Workforce operations
             </p>
             <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl dark:text-white">
-              Team Attendance
+              Daily Employee Activity
             </h1>
             <p className="mt-2 text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
-              Monitor office presence, verify attendance evidence and resolve
-              exceptions from one manager workspace.
+              See every employee's login, attendance, breaks, Punch Out and
+              automatic all-device logout in one simple daily view.
             </p>
 
             <div className="mt-5 flex flex-wrap gap-2">
@@ -353,9 +398,15 @@ export default async function InternalAttendancePage({
                 primary
               />
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                Download daily activity
+              </span>
+              <ReportExportButtons href={exportHref} compact />
+            </div>
           </div>
 
-          <div className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 p-4 xl:w-[360px] dark:border-white/10 dark:bg-white/[0.035]">
+          <div className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 p-4 xl:w-[430px] dark:border-white/10 dark:bg-white/[0.035]">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.17em] text-slate-400">
@@ -372,16 +423,37 @@ export default async function InternalAttendancePage({
               />
             </div>
 
-            <form className="mt-4 flex gap-2">
-              <input
-                aria-label="Attendance date"
-                name="date"
-                type="date"
-                defaultValue={selectedDate}
-                className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-500/10"
-              />
-              <button className="h-10 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-600 dark:hover:bg-blue-700">
-                Apply
+            <form className="mt-4 grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Date</span>
+                <input
+                  aria-label="Attendance date"
+                  name="date"
+                  type="date"
+                  defaultValue={selectedDate}
+                  className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-500/10"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Employee</span>
+                <select name="employee" defaultValue={selectedEmployee} className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none dark:border-white/10 dark:bg-slate-950 dark:text-slate-100">
+                  <option value="ALL">All employees</option>
+                  {rows.map((row) => <option key={row.userId} value={row.userId}>{row.userName}</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <span className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Status</span>
+                <select name="status" defaultValue={selectedStatus} className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none dark:border-white/10 dark:bg-slate-950 dark:text-slate-100">
+                  <option value="ALL">All statuses</option>
+                  <option value="WORKING">Currently working</option>
+                  <option value="ON_BREAK">On break</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="NOT_PUNCHED">Not punched in</option>
+                  <option value="REVIEW_REQUIRED">Review required</option>
+                </select>
+              </label>
+              <button className="mt-auto h-10 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-600 dark:hover:bg-blue-700">
+                Apply Filters
               </button>
             </form>
           </div>
@@ -453,7 +525,7 @@ export default async function InternalAttendancePage({
               Daily workforce register
             </p>
             <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950 dark:text-white">
-              Employee attendance
+              Employee day timeline
             </h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -464,17 +536,38 @@ export default async function InternalAttendancePage({
               </span>
             ) : null}
             <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-600 dark:bg-white/10 dark:text-slate-300">
-              {rows.length} {rows.length === 1 ? "employee" : "employees"}
+              {filteredRows.length} of {rows.length} employees
             </span>
           </div>
         </div>
 
         <div className="space-y-3 bg-slate-50/60 p-3 sm:p-4 dark:bg-slate-950/35">
-          {rows.map((row) => {
+          {filteredRows.map((row) => {
             const statusLabel = getStatusLabel(row);
             const rowEvents = row.attendanceId
               ? eventMap.get(row.attendanceId) || []
               : [];
+            const rowSessionEvents = sessionEventMap.get(row.userId) || [];
+            const firstLogin = rowSessionEvents.find((event) => event.eventType === "LOGIN_SUCCESS");
+            const lastLogout = [...rowSessionEvents].reverse().find((event) => event.eventType === "LOGOUT");
+            const activityEvents = [
+              ...rowEvents.map((event) => ({
+                id: event.id,
+                label: getAttendanceActionLabel(event.eventType),
+                createdAt: event.createdAt,
+                distanceMeters: event.distanceMeters,
+                photoDataUrl: event.photoDataUrl,
+                note: event.note,
+              })),
+              ...rowSessionEvents.map((event) => ({
+                id: event.id,
+                label: getSessionEventLabel(event),
+                createdAt: event.createdAt,
+                distanceMeters: null,
+                photoDataUrl: null,
+                note: event.description,
+              })),
+            ].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
             return (
               <article
@@ -512,7 +605,12 @@ export default async function InternalAttendancePage({
                     </span>
                   </div>
 
-                  <div className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4 dark:border-white/10 dark:bg-white/10">
+                  <div className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-6 dark:border-white/10 dark:bg-white/10">
+                    <div className="bg-slate-50 p-4 dark:bg-white/[0.035]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Login</p>
+                      <p className="mt-2 text-sm font-black text-blue-700 dark:text-blue-300">{formatIndiaTime(firstLogin?.createdAt)}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-400">First successful login</p>
+                    </div>
                     <div className="bg-slate-50 p-4 dark:bg-white/[0.035]">
                       <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
                         Punch In
@@ -559,6 +657,11 @@ export default async function InternalAttendancePage({
                         {formatDuration(row.totalMinutes)} total office time
                       </p>
                     </div>
+                    <div className="bg-slate-50 p-4 dark:bg-white/[0.035]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Session End</p>
+                      <p className="mt-2 text-sm font-black text-rose-700 dark:text-rose-300">{formatIndiaTime(lastLogout?.createdAt)}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-400">{lastLogout?.description?.toLowerCase().includes("all devices") ? "All devices logged out" : lastLogout ? "Logout recorded" : "Session still open / no login"}</p>
+                    </div>
                   </div>
                 </div>
 
@@ -581,10 +684,10 @@ export default async function InternalAttendancePage({
                         <path d="M4 5h16v14H4z" />
                         <path d="m8 14 2-2 2 2 4-4 2 2" />
                       </svg>
-                      Evidence timeline and manager correction
+                      Complete activity timeline and manager correction
                     </span>
                     <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                      {rowEvents.length} events
+                      {activityEvents.length} events
                       <svg
                         viewBox="0 0 24 24"
                         className="h-4 w-4 transition group-open:rotate-180"
@@ -611,9 +714,9 @@ export default async function InternalAttendancePage({
                         </span>
                       </div>
 
-                      {rowEvents.length > 0 ? (
+                      {activityEvents.length > 0 ? (
                         <div className="mt-3 space-y-2">
-                          {rowEvents.map((event, index) => (
+                          {activityEvents.map((event, index) => (
                             <div
                               key={event.id}
                               className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-slate-900"
@@ -625,14 +728,13 @@ export default async function InternalAttendancePage({
                                 <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
                                   <div>
                                     <p className="text-xs font-black text-slate-800 dark:text-slate-100">
-                                      {getAttendanceActionLabel(
-                                        event.eventType,
-                                      )}
+                                      {event.label}
                                     </p>
                                     <p className="mt-1 text-[11px] font-semibold text-slate-400">
-                                      {formatIndiaTime(event.createdAt)} ·{" "}
-                                      {formatDistance(event.distanceMeters)}
+                                      {formatIndiaTime(event.createdAt)}
+                                      {event.distanceMeters !== null ? ` · ${formatDistance(event.distanceMeters)}` : ""}
                                     </p>
+                                    {event.note ? <p className="mt-1 text-[11px] font-medium leading-5 text-slate-500 dark:text-slate-400">{event.note}</p> : null}
                                   </div>
                                   {event.photoDataUrl ? (
                                     <Image
@@ -651,7 +753,7 @@ export default async function InternalAttendancePage({
                         </div>
                       ) : (
                         <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-xs font-semibold text-slate-400 dark:border-white/10 dark:bg-slate-900">
-                          No attendance evidence recorded for this employee.
+                          No login or attendance activity recorded for this employee.
                         </div>
                       )}
                     </div>
@@ -741,6 +843,12 @@ export default async function InternalAttendancePage({
               </article>
             );
           })}
+          {rows.length > 0 && filteredRows.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-5 py-12 text-center dark:border-white/10 dark:bg-slate-900">
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200">No employees match these filters</p>
+              <p className="mt-1 text-xs font-semibold text-slate-400">Change employee, status or date and try again.</p>
+            </div>
+          ) : null}
 
           {rows.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-14 text-center dark:border-white/10 dark:bg-slate-900">

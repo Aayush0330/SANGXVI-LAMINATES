@@ -4,10 +4,7 @@ import { getAppRolesFromUser } from "@/lib/user-role-utils";
 import { prisma } from "@/lib/db";
 import { getCurrentSession } from "@/lib/session";
 import { getOrderSourceLabel } from "@/lib/dealer-directory";
-
-function csv(value: unknown) {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
-}
+import { createReportDownloadResponse, getReportFormat } from "@/lib/report-export";
 
 export async function GET(request: NextRequest) {
   const session = await getCurrentSession();
@@ -58,9 +55,8 @@ export async function GET(request: NextRequest) {
     );
   });
 
-  const rows = [
-    ["Order", "Dealer", "Source", "Status", "Subtotal", "Tax", "Order Total", "Frozen Price Lines", "Received", "Physical Teams", "Assignment Statuses", "Open Problems", "Driver", "Transport", "Proofs", "Timeline Updates", "Created", "Updated"],
-    ...filtered.map((order) => {
+  const columns = ["Order", "Dealer", "Source", "Status", "Subtotal", "Tax", "Order Total", "Frozen Price Lines", "Received", "Physical Teams", "Assignment Statuses", "Open Problems", "Driver", "Transport", "Proofs", "Timeline Updates", "Created", "Updated"];
+  const rows = filtered.map((order) => {
       const subtotal = order.items.reduce((total, item) => total + Number(item.lineSubtotal), 0);
       const taxAmount = order.items.reduce((total, item) => total + Number(item.taxAmount), 0);
       const totalAmount = order.items.reduce((total, item) => total + Number(item.lineTotal), 0);
@@ -84,13 +80,16 @@ export async function GET(request: NextRequest) {
       order.createdAt.toISOString(),
       order.updatedAt.toISOString(),
       ];
-    }),
-  ];
+    });
 
-  return new NextResponse(rows.map((row) => row.map(csv).join(",")).join("\n"), {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="order-journey-${new Date().toISOString().slice(0, 10)}.csv"`,
+  return createReportDownloadResponse(
+    getReportFormat(request.nextUrl.searchParams.get("format")),
+    {
+      title: "Order Journey Audit",
+      subtitle: `Status: ${status} | Team: ${teamId} | Attention only: ${attentionOnly ? "Yes" : "No"}`,
+      fileName: `order-journey-${new Date().toISOString().slice(0, 10)}`,
+      columns,
+      rows,
     },
-  });
+  );
 }
