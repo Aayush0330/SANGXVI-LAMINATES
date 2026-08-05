@@ -375,7 +375,7 @@ export default async function InternalAttendancePage({
               Daily Employee Activity
             </h1>
             <p className="mt-2 text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
-              See every employee's login, attendance, breaks, Punch Out and
+              See every employee&apos;s login, attendance, breaks, Punch Out and
               automatic all-device logout in one simple daily view.
             </p>
 
